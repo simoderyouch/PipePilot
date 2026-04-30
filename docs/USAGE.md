@@ -130,7 +130,8 @@ Node backend with nginx reverse proxy:
   -e production \
   --remote \
   --setup-server \
-  --app-kind node \
+  --app-kind backend \
+  --backend-runtime node \
   --host api.myserver.com \
   --user ubuntu \
   --key ~/.ssh/server_key.pem \
@@ -146,7 +147,8 @@ Useful setup options:
 
 ```text
 --setup-server          Enable fresh-server provisioning
---app-kind <kind>       auto | static | frontend | node | python | c | generic
+--app-kind <kind>       auto | frontend | backend
+--backend-runtime <rt>  auto | python | node
 --domain <domain>       nginx server_name for frontend/proxy configs
 --app-port <port>       backend port for nginx reverse proxy
 --package-manager <pm>  auto | apt | dnf | yum | apk
@@ -154,9 +156,10 @@ Useful setup options:
 ```
 
 With `--app-kind auto`, PipePilot uses local project detection and deployment
-arguments to infer the setup. For example, a Node project that uploads `dist/`
-is treated like a frontend, while a Node project with `--app-port` is treated
-like a backend service.
+arguments to infer the setup. A project that uploads `dist/`, `build/`, or
+`public/` is treated like a frontend. A project with `--app-port` or a Python
+project is treated like a backend. Backend runtime can be selected explicitly
+with `--backend-runtime python` or `--backend-runtime node`.
 
 ## Logs
 
@@ -194,7 +197,7 @@ server accessible through SSH. The user provides the remote host, SSH username,
 private key, SSH port, target directory, and optional post-deployment commands.
 PipePilot can also prepare a fresh server automatically with `--setup-server`:
 it detects the application type, installs the required packages, creates the
-remote target directory, and can configure nginx for static frontend hosting or
+remote target directory, and can configure nginx for frontend hosting or
 backend reverse proxying. During deployment, PipePilot transfers files using
 rsync or scp, executes remote commands through ssh, and verifies the deployment
 using smoke tests such as curl or nc. This makes the tool independent from a

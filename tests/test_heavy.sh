@@ -1,64 +1,53 @@
 #!/usr/bin/env bash
-# Scenario 3 - Heavy project.
-# Creates a small C multi-file project and runs PipePilot in thread-simulation
+# Scenario 3 - Backend project.
+# Creates a Python backend-style project and runs PipePilot in thread-simulation
 # mode. Production is executed with --dry-run so the scenario demonstrates the
 # production command safely without requiring root or a remote server.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK_DIR="$ROOT_DIR/tests/tmp/heavy_c_project"
+WORK_DIR="$ROOT_DIR/tests/tmp/backend_python_project"
 ARCHIVE_DIR="$ROOT_DIR/tests/tmp/archives/heavy"
 LOG_DIR="$ROOT_DIR/tests/tmp/logs/heavy"
 
 rm -rf "$WORK_DIR" "$ARCHIVE_DIR" "$LOG_DIR"
-mkdir -p "$WORK_DIR"
+mkdir -p "$WORK_DIR/tests"
 
-cat > "$WORK_DIR/mathlib.h" <<'C'
-#ifndef MATHLIB_H
-#define MATHLIB_H
+cat > "$WORK_DIR/app.py" <<'PY'
+"""Small backend module used by the PipePilot backend scenario."""
 
-int add(int left, int right);
-int multiply(int left, int right);
 
-#endif
-C
+def health() -> dict[str, str]:
+    """Return a simple health payload like a backend API would."""
+    return {"status": "ok"}
 
-cat > "$WORK_DIR/mathlib.c" <<'C'
-#include "mathlib.h"
 
-int add(int left, int right) {
-    return left + right;
-}
+def add_job(name: str) -> str:
+    """Pretend to enqueue a backend job."""
+    return f"job:{name}:queued"
 
-int multiply(int left, int right) {
-    return left * right;
-}
-C
 
-cat > "$WORK_DIR/main.c" <<'C'
-#include <stdio.h>
-#include "mathlib.h"
+if __name__ == "__main__":
+    print(health()["status"])
+PY
 
-int main(void) {
-    printf("%d\n", add(2, 3) + multiply(2, 4));
-    return 0;
-}
-C
+cat > "$WORK_DIR/tests/test_app.py" <<'PY'
+from pathlib import Path
+import sys
 
-cat > "$WORK_DIR/Makefile" <<'MAKE'
-CC=gcc
-CFLAGS=-Wall -Wextra -pedantic
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-app: main.c mathlib.c mathlib.h
-	$(CC) $(CFLAGS) main.c mathlib.c -o app
+from app import add_job, health
 
-test: app
-	./app | grep -q '^13$$'
 
-clean:
-	rm -f app
-MAKE
+def test_health():
+    assert health() == {"status": "ok"}
+
+
+def test_add_job():
+    assert add_job("deploy") == "job:deploy:queued"
+PY
 
 "$ROOT_DIR/pipepilot" \
     -t \
@@ -67,8 +56,10 @@ MAKE
     -e production \
     -b main \
     -v \
+    --app-kind backend \
+    --backend-runtime python \
+    --app-port 8000 \
     --archive-dir "$ARCHIVE_DIR" \
     -l "$LOG_DIR"
 
-echo "[SCENARIO] Heavy C project completed"
-
+echo "[SCENARIO] Backend Python project completed"

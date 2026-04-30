@@ -47,7 +47,7 @@ and release notes are tracked in `CHANGELOG.md`.
 ./tests/run_all.sh
 ```
 
-The scenarios build temporary Shell, Python, and C projects under `tests/tmp/`
+The scenarios build temporary frontend and backend projects under `tests/tmp/`
 and demonstrate sequential, subshell, and thread-simulation execution.
 
 ## Remote Deployment

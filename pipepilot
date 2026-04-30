@@ -58,6 +58,7 @@ RESTART_SERVICE=""
 TRANSFER_TOOL="rsync"
 SETUP_SERVER=0
 APP_KIND="auto"
+BACKEND_RUNTIME="auto"
 DOMAIN_NAME=""
 APP_PORT=""
 PACKAGE_MANAGER="auto"
@@ -103,6 +104,7 @@ CLI_RESTART_SET=0
 CLI_TRANSFER_SET=0
 CLI_SETUP_SERVER_SET=0
 CLI_APP_KIND_SET=0
+CLI_BACKEND_RUNTIME_SET=0
 CLI_DOMAIN_SET=0
 CLI_APP_PORT_SET=0
 CLI_PACKAGE_MANAGER_SET=0
@@ -124,7 +126,7 @@ DEPLOY_STARTED=0
 show_help() {
     cat <<'HELP'
 NAME
-    pipepilot - Bash CI/CD automation tool for generic projects
+    pipepilot - Bash CI/CD automation tool for frontend and backend projects
 
 SYNOPSIS
     pipepilot [OPTIONS] -p <project_path>
@@ -188,7 +190,8 @@ DEPLOY OPTIONS
     --restart <service>    Restart a service after deployment
     --transfer <tool>      Transfer tool for remote mode: rsync | scp
     --setup-server         Prepare a fresh remote Linux server before upload
-    --app-kind <kind>      auto | static | frontend | node | python | c | generic
+    --app-kind <kind>      auto | frontend | backend
+    --backend-runtime <rt> auto | python | node
     --domain <domain>      Domain/server_name for generated nginx config
     --app-port <port>      Backend app port used by generated reverse proxy
     --package-manager <pm> auto | apt | dnf | yum | apk
@@ -226,7 +229,7 @@ EXAMPLES
     sudo ./pipepilot -r -p /srv/app
     ./pipepilot -d -p /srv/app -e production
     ./pipepilot -p ./frontend -e production --remote --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /var/www/frontend --deploy-dir dist --url https://myserver.com
-    ./pipepilot -p ./backend -e production --remote --setup-server --app-kind node --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /srv/backend --app-port 3000 --domain api.myserver.com
+    ./pipepilot -p ./backend -e production --remote --setup-server --app-kind backend --backend-runtime node --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /srv/backend --app-port 3000 --domain api.myserver.com
 HELP
 }
 
@@ -338,6 +341,7 @@ load_configs() {
     SSH_PORT="${SSH_PORT:-${DEFAULT_SSH_PORT:-22}}"
     TRANSFER_TOOL="${TRANSFER_TOOL:-${DEFAULT_TRANSFER_TOOL:-rsync}}"
     APP_KIND="${APP_KIND:-${DEFAULT_APP_KIND:-auto}}"
+    BACKEND_RUNTIME="${BACKEND_RUNTIME:-${DEFAULT_BACKEND_RUNTIME:-auto}}"
     PACKAGE_MANAGER="${PACKAGE_MANAGER:-${DEFAULT_PACKAGE_MANAGER:-auto}}"
 
     local env_file="$SCRIPT_DIR/configs/${ENVIRONMENT}.conf"
@@ -354,6 +358,7 @@ load_configs() {
     local cli_transfer="$TRANSFER_TOOL"
     local cli_setup_server="$SETUP_SERVER"
     local cli_app_kind="$APP_KIND"
+    local cli_backend_runtime="$BACKEND_RUNTIME"
     local cli_domain="$DOMAIN_NAME"
     local cli_app_port="$APP_PORT"
     local cli_package_manager="$PACKAGE_MANAGER"
@@ -376,6 +381,7 @@ load_configs() {
     TRANSFER_TOOL="${TRANSFER_TOOL:-rsync}"
     SETUP_SERVER="${SETUP_SERVER:-0}"
     APP_KIND="${APP_KIND:-auto}"
+    BACKEND_RUNTIME="${BACKEND_RUNTIME:-auto}"
     DOMAIN_NAME="${DOMAIN_NAME:-}"
     APP_PORT="${APP_PORT:-}"
     PACKAGE_MANAGER="${PACKAGE_MANAGER:-auto}"
@@ -394,6 +400,7 @@ load_configs() {
     [[ "$CLI_TRANSFER_SET" -eq 0 ]] || TRANSFER_TOOL="$cli_transfer"
     [[ "$CLI_SETUP_SERVER_SET" -eq 0 ]] || SETUP_SERVER="$cli_setup_server"
     [[ "$CLI_APP_KIND_SET" -eq 0 ]] || APP_KIND="$cli_app_kind"
+    [[ "$CLI_BACKEND_RUNTIME_SET" -eq 0 ]] || BACKEND_RUNTIME="$cli_backend_runtime"
     [[ "$CLI_DOMAIN_SET" -eq 0 ]] || DOMAIN_NAME="$cli_domain"
     [[ "$CLI_APP_PORT_SET" -eq 0 ]] || APP_PORT="$cli_app_port"
     [[ "$CLI_PACKAGE_MANAGER_SET" -eq 0 ]] || PACKAGE_MANAGER="$cli_package_manager"
@@ -613,6 +620,12 @@ parse_args() {
                 CLI_APP_KIND_SET=1
                 shift 2
                 ;;
+            --backend-runtime)
+                need_value "$1" "${2:-}"
+                BACKEND_RUNTIME="$2"
+                CLI_BACKEND_RUNTIME_SET=1
+                shift 2
+                ;;
             --domain)
                 need_value "$1" "${2:-}"
                 DOMAIN_NAME="$2"
@@ -715,8 +728,13 @@ validate_options() {
     fi
 
     case "$APP_KIND" in
-        auto|static|frontend|node|python|c|generic) ;;
+        auto|frontend|backend) ;;
         *) die "$ERR_CONFIG" "[CONFIG] Invalid app kind: $APP_KIND" ;;
+    esac
+
+    case "$BACKEND_RUNTIME" in
+        auto|python|node) ;;
+        *) die "$ERR_CONFIG" "[CONFIG] Invalid backend runtime: $BACKEND_RUNTIME" ;;
     esac
 
     case "$PACKAGE_MANAGER" in

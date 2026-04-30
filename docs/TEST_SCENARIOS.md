@@ -24,15 +24,15 @@ specification. Each script creates its own temporary demo project under
 - Execution mode: subshell
 - Validates: Python syntax checking, tests, isolated pipeline execution
 
-## Scenario 3 - Heavy
+## Scenario 3 - Backend
 
 ```bash
 ./tests/test_heavy.sh
 ```
 
-- Project type: C
+- Project type: Backend Python
 - Execution mode: thread simulation
-- Validates: background jobs, C compilation, `make test`, production dry-run
+- Validates: background jobs, backend tests, production dry-run
 
 ## Run Everything
 
@@ -49,7 +49,7 @@ written to `tests/tmp/archives/`.
 ./tests/test_remote_dry_run.sh
 ```
 
-- Project type: generic/static frontend
+- Project type: frontend
 - Execution mode: sequential
 - Validates: `--remote`, `--setup-server`, app-kind provisioning, SSH key
   validation, `--deploy-dir`, `--remote-cmd`, `--restart`, and `--transfer scp`

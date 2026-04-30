@@ -105,7 +105,7 @@ validate_remote_config() {
 effective_app_kind() {
     # `auto` turns the local project detection into a deployment-oriented kind.
     # For example, a Node project that uploads dist/ is usually a frontend,
-    # while a Node project with an app port is usually a backend service.
+    # while a project with an app port is usually a backend service.
     if [[ "$APP_KIND" != "auto" ]]; then
         echo "$APP_KIND"
         return 0
@@ -113,38 +113,40 @@ effective_app_kind() {
 
     if [[ -n "$DEPLOY_DIR" && "$DEPLOY_DIR" =~ (^|/)(dist|build|public)$ ]]; then
         echo "frontend"
-    elif [[ -n "$APP_PORT" && "$PROJECT_TYPE" == "node" ]]; then
-        echo "node"
+    elif [[ -n "$APP_PORT" || "$PROJECT_TYPE" == "python" ]]; then
+        echo "backend"
     elif [[ "$PROJECT_TYPE" == "node" ]]; then
         echo "frontend"
+    else
+        echo "frontend"
+    fi
+}
+
+effective_backend_runtime() {
+    if [[ "$BACKEND_RUNTIME" != "auto" ]]; then
+        echo "$BACKEND_RUNTIME"
     elif [[ "$PROJECT_TYPE" == "python" ]]; then
         echo "python"
-    elif [[ "$PROJECT_TYPE" == "c" ]]; then
-        echo "c"
-    elif [[ "$PROJECT_TYPE" == "shell" || "$PROJECT_TYPE" == "generic" ]]; then
-        echo "generic"
+    elif [[ "$PROJECT_TYPE" == "node" ]]; then
+        echo "node"
     else
-        echo "generic"
+        echo "node"
     fi
 }
 
 setup_package_list() {
     local kind="$1"
+    local runtime="$2"
     case "$kind" in
-        static|frontend)
+        frontend)
             echo "nginx rsync curl"
             ;;
-        node)
-            echo "nodejs npm rsync curl"
-            ;;
-        python)
-            echo "python3 python3-pip python3-venv rsync curl"
-            ;;
-        c)
-            echo "build-essential make gcc rsync curl"
-            ;;
-        generic)
-            echo "rsync curl"
+        backend)
+            if [[ "$runtime" == "python" ]]; then
+                echo "python3 python3-pip python3-venv nginx rsync curl"
+            else
+                echo "nodejs npm nginx rsync curl"
+            fi
             ;;
     esac
 }
@@ -152,10 +154,11 @@ setup_package_list() {
 setup_remote_server() {
     [[ "$SETUP_SERVER" -eq 1 ]] || return "$OK"
 
-    local kind packages server_name proxy_port setup_cmd target_path package_manager remote_user
-    local kind_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
+    local kind runtime packages server_name proxy_port setup_cmd target_path package_manager remote_user
+    local kind_q runtime_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
     kind="$(effective_app_kind)"
-    packages="$(setup_package_list "$kind")"
+    runtime="$(effective_backend_runtime)"
+    packages="$(setup_package_list "$kind" "$runtime")"
     server_name="${DOMAIN_NAME:-_}"
     proxy_port="$APP_PORT"
     setup_cmd="$SETUP_CMD"
@@ -164,6 +167,7 @@ setup_remote_server() {
     remote_user="$REMOTE_USER"
 
     printf -v kind_q '%q' "$kind"
+    printf -v runtime_q '%q' "$runtime"
     printf -v packages_q '%q' "$packages"
     printf -v server_name_q '%q' "$server_name"
     printf -v proxy_port_q '%q' "$proxy_port"
@@ -172,12 +176,12 @@ setup_remote_server() {
     printf -v package_manager_q '%q' "$package_manager"
     printf -v remote_user_q '%q' "$remote_user"
 
-    log_info "[SETUP] Fresh-server setup started -- kind $kind -- packages: $packages"
+    log_info "[SETUP] Fresh-server setup started -- kind $kind -- runtime $runtime -- packages: $packages"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log_info "[DRY-RUN] [SETUP] Would install packages on $REMOTE_HOST: $packages"
         log_info "[DRY-RUN] [SETUP] Would create target directory: $target_path"
-        if [[ "$kind" == "static" || "$kind" == "frontend" || -n "$proxy_port" ]]; then
+        if [[ "$kind" == "frontend" || -n "$proxy_port" ]]; then
             log_info "[DRY-RUN] [SETUP] Would configure nginx for ${server_name}"
         fi
         [[ -z "$setup_cmd" ]] || log_info "[DRY-RUN] [SETUP] Extra setup command: $setup_cmd"
@@ -188,6 +192,7 @@ setup_remote_server() {
 set -euo pipefail
 
 APP_KIND=$kind_q
+BACKEND_RUNTIME_VALUE=$runtime_q
 PACKAGES=$packages_q
 TARGET_PATH=$target_path_q
 REMOTE_USER_NAME=$remote_user_q
@@ -220,11 +225,8 @@ detect_pm() {
 
 install_packages() {
     pm="\$(detect_pm)"
-    case "\$APP_KIND:\$pm" in
-        c:apt) PACKAGES="build-essential make gcc rsync curl" ;;
-        c:dnf|c:yum) PACKAGES="gcc gcc-c++ make rsync curl" ;;
-        c:apk) PACKAGES="build-base rsync curl" ;;
-        python:apk) PACKAGES="python3 py3-pip py3-virtualenv rsync curl" ;;
+    case "\$APP_KIND:\$BACKEND_RUNTIME_VALUE:\$pm" in
+        backend:python:apk) PACKAGES="python3 py3-pip py3-virtualenv nginx rsync curl" ;;
     esac
 
     case "\$pm" in
@@ -267,7 +269,7 @@ configure_nginx() {
         proxy_cache_bypass \\\$http_upgrade;
     }
 }"
-    elif [ "\$APP_KIND" = "static" ] || [ "\$APP_KIND" = "frontend" ]; then
+    elif [ "\$APP_KIND" = "frontend" ]; then
         NGINX_BODY="server {
     listen 80;
     server_name \$SERVER_NAME;

@@ -2,8 +2,9 @@
 # Step 4 - Build / Compilation or Packaging.
 #
 # This file creates the deployable artifact. It supports custom build commands,
-# clean builds, dependency installation, build.sh, Makefile, Node.js, Python,
-# C, and generic projects that do not need compilation.
+# clean builds, dependency installation, build.sh, Makefile, Node.js frontends
+# or backends, Python backends, and frontend projects that do not need
+# compilation.
 
 stage_build() {
     if [[ "$SKIP_BUILD" -eq 1 ]]; then
@@ -50,12 +51,6 @@ stage_build() {
                     run_shell_in_project "python3 -m pip install -r requirements.txt" || return "$ERR_BUILD"
                 fi
                 ;;
-            c)
-                if [[ -f "$PROJECT_PATH/main.c" ]]; then
-                    require_command gcc "$ERR_DEPENDENCY"
-                    run_shell_in_project "gcc main.c -o app" || return "$ERR_BUILD"
-                fi
-                ;;
             *)
                 log_info "[BUILD] No build command needed for this project type"
                 ;;
@@ -65,4 +60,3 @@ stage_build() {
     log_info "[BUILD] Build successful -- artifact generated"
     return "$OK"
 }
-

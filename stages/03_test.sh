@@ -16,7 +16,7 @@ stage_test() {
     local failed=0
 
     case "$PROJECT_TYPE" in
-        shell|generic)
+        shell|frontend)
             local test_file
             while IFS= read -r test_file; do
                 [[ -z "$TEST_PATTERN" || "$test_file" == *"$TEST_PATTERN"* ]] || continue
@@ -53,18 +53,9 @@ stage_test() {
                 passed=1
             fi
             ;;
-        c)
-            if [[ -f "$PROJECT_PATH/Makefile" || -f "$PROJECT_PATH/makefile" ]]; then
-                run_shell_in_project "make test" || return "$ERR_TEST"
-                passed=1
-            else
-                log_info "[TEST] No Makefile test target detected; skipping"
-            fi
-            ;;
     esac
 
     [[ "$failed" -eq 0 ]] || return "$ERR_TEST"
     log_info "[TEST] $passed tests passed successfully"
     return "$OK"
 }
-

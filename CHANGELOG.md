@@ -4,12 +4,20 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.5.0] - 2026-04-30
+
+### Changed
+
+- Refocused smart deployment around only `frontend` and `backend`.
+- Added `--backend-runtime auto|python|node` for backend setup.
+- Replaced the C heavy scenario with a Python backend scenario.
+
 ## [0.4.0] - 2026-04-30
 
 ### Added
 
 - Smart fresh-server setup with `--setup-server`.
-- App-aware provisioning using `--app-kind auto|static|frontend|node|python|c|generic`.
+- App-aware provisioning.
 - Optional nginx setup with `--domain` and backend reverse proxy support with
   `--app-port`.
 - Package-manager selection with `--package-manager auto|apt|dnf|yum|apk`.

@@ -2,7 +2,8 @@
 # Step 2 - Lint / Static Code Analysis.
 #
 # This file checks syntax and static quality based on PROJECT_TYPE. It supports
-# Shell, Python, C, Node.js, custom lint tools, skip mode, and strict mode.
+# Shell helpers, Python backends, Node.js frontends/backends, custom lint tools,
+# skip mode, and strict mode.
 
 stage_lint() {
     if [[ "$SKIP_LINT" -eq 1 ]]; then
@@ -40,13 +41,6 @@ stage_lint() {
                 fi
             done < <(find "$PROJECT_PATH" -type f -name "*.py")
             ;;
-        c)
-            local c_file
-            require_command gcc "$ERR_DEPENDENCY"
-            while IFS= read -r c_file; do
-                gcc -Wall -fsyntax-only "$c_file" || return "$ERR_LINT"
-            done < <(find "$PROJECT_PATH" -type f -name "*.c")
-            ;;
         node)
             if [[ -f "$PROJECT_PATH/package.json" ]] && command -v npm >/dev/null 2>&1; then
                 if run_shell_in_project "npm run | grep -q '^  lint'"; then
@@ -59,11 +53,10 @@ stage_lint() {
             fi
             ;;
         *)
-            log_info "[LINT] No known lint strategy for generic project; skipping"
+            log_info "[LINT] No known lint strategy for this frontend/backend project; skipping"
             ;;
     esac
 
     log_info "[LINT] No syntax errors detected"
     return "$OK"
 }
-

@@ -12,12 +12,10 @@ detect_project_type() {
         PROJECT_TYPE="node"
     elif find "$PROJECT_PATH" -maxdepth 2 -name "*.py" -print -quit | grep -q .; then
         PROJECT_TYPE="python"
-    elif find "$PROJECT_PATH" -maxdepth 2 -name "*.c" -print -quit | grep -q .; then
-        PROJECT_TYPE="c"
     elif find "$PROJECT_PATH" -maxdepth 2 -name "*.sh" -print -quit | grep -q .; then
         PROJECT_TYPE="shell"
     else
-        PROJECT_TYPE="generic"
+        PROJECT_TYPE="frontend"
     fi
     log_info "[DETECT] Project type detected: $PROJECT_TYPE"
 }
@@ -50,4 +48,3 @@ stage_pull() {
     detect_project_type
     return "$OK"
 }
-
