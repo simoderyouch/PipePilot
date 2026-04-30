@@ -4,6 +4,12 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.7.1] - 2026-04-30
+
+### Changed
+
+- Replaced the first logo with a cleaner professional SVG wordmark.
+
 ## [0.7.0] - 2026-04-30
 
 ### Added

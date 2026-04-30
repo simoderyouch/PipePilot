@@ -1,15 +1,42 @@
-<svg width="960" height="260" viewBox="0 0 960 260" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">PipePilot logo</title>
-  <desc id="desc">PipePilot wordmark with a pipeline route and pilot marker.</desc>
-  <rect width="960" height="260" rx="32" fill="#07111F"/>
-  <path d="M86 142C86 105.549 115.549 76 152 76H218C254.451 76 284 105.549 284 142C284 178.451 254.451 208 218 208H152C115.549 208 86 178.451 86 142Z" fill="#0EA5E9"/>
-  <path d="M154 110H218C235.673 110 250 124.327 250 142C250 159.673 235.673 174 218 174H154V110Z" fill="#07111F"/>
-  <path d="M154 128H214C221.732 128 228 134.268 228 142C228 149.732 221.732 156 214 156H154V128Z" fill="#F8FAFC"/>
-  <path d="M298 142H372" stroke="#38BDF8" stroke-width="14" stroke-linecap="round"/>
-  <circle cx="405" cy="142" r="28" fill="#22C55E"/>
-  <path d="M405 126V158M389 142H421" stroke="#07111F" stroke-width="8" stroke-linecap="round"/>
-  <path d="M451 142H528" stroke="#38BDF8" stroke-width="14" stroke-linecap="round"/>
-  <path d="M548 106L618 142L548 178V106Z" fill="#F8FAFC"/>
-  <text x="655" y="132" fill="#F8FAFC" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="0">PipePilot</text>
-  <text x="657" y="171" fill="#93C5FD" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="0">Automate. Validate. Deploy. Rollback safely.</text>
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">PipePilot</title>
+  <desc id="desc">A professional PipePilot wordmark with a pipeline navigation symbol.</desc>
+  <defs>
+    <linearGradient id="markGradient" x1="58" y1="42" x2="248" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="0.48" stop-color="#0B3B5E"/>
+      <stop offset="1" stop-color="#0369A1"/>
+    </linearGradient>
+    <linearGradient id="signalGradient" x1="92" y1="92" x2="226" y2="218" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="0.48" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#22C55E"/>
+    </linearGradient>
+    <filter id="softShadow" x="28" y="20" width="270" height="270" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="14"/>
+      <feGaussianBlur stdDeviation="20"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.020 0 0 0 0 0.071 0 0 0 0 0.140 0 0 0 0.20 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <rect x="64" y="48" width="208" height="208" rx="52" fill="url(#markGradient)"/>
+    <rect x="79" y="63" width="178" height="178" rx="40" stroke="white" stroke-opacity="0.14" stroke-width="2"/>
+    <path d="M117 194V118C117 105.85 126.85 96 139 96H176C197.539 96 215 113.461 215 135C215 156.539 197.539 174 176 174H141" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M143 194H197C210.255 194 221 204.745 221 218V218" stroke="url(#signalGradient)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="143" cy="194" r="10" fill="#67E8F9"/>
+    <circle cx="221" cy="218" r="10" fill="#22C55E"/>
+    <path d="M214 104L232 86M232 86H207M232 86V111" stroke="#67E8F9" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g>
+    <text x="326" y="145" fill="#0F172A" font-family="Plus Jakarta Sans, Avenir Next, system-ui, sans-serif" font-size="76" font-weight="800" letter-spacing="-1.5">PipePilot</text>
+    <text x="329" y="191" fill="#475569" font-family="Plus Jakarta Sans, Avenir Next, system-ui, sans-serif" font-size="25" font-weight="600" letter-spacing="0.3">Automate. Validate. Deploy. Rollback safely.</text>
+    <path d="M331 220H792" stroke="#E2E8F0" stroke-width="2" stroke-linecap="round"/>
+    <path d="M331 220H468" stroke="#38BDF8" stroke-width="2" stroke-linecap="round"/>
+  </g>
 </svg>
