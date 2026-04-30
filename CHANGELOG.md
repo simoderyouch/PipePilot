@@ -11,4 +11,6 @@ semantic version numbers from `VERSION`.
 - Initial repository identity for PipePilot.
 - Project structure for configs, hooks, tests, archives, logs, and docs.
 - Versioning files for teacher-visible release history.
-
+- Fully commented PipePilot Bash CLI.
+- Three runnable academic test scenarios.
+- Usage and scenario documentation.
