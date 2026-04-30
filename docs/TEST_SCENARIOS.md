@@ -43,3 +43,13 @@ specification. Each script creates its own temporary demo project under
 Runtime logs are written to `tests/tmp/logs/`, and generated archives are
 written to `tests/tmp/archives/`.
 
+## Extra Scenario - Remote Dry Run
+
+```bash
+./tests/test_remote_dry_run.sh
+```
+
+- Project type: generic/static frontend
+- Execution mode: sequential
+- Validates: `--remote`, SSH key validation, `--deploy-dir`, `--remote-cmd`,
+  `--restart`, and `--transfer scp` without contacting a real server

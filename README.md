@@ -49,3 +49,14 @@ and release notes are tracked in `CHANGELOG.md`.
 
 The scenarios build temporary Shell, Python, and C projects under `tests/tmp/`
 and demonstrate sequential, subshell, and thread-simulation execution.
+
+## Remote Deployment
+
+PipePilot can deploy to any Linux server that accepts SSH:
+
+```bash
+./pipepilot -p ./frontend -e production --remote \
+  --host myserver.com --user ubuntu --key ~/.ssh/server_key.pem \
+  --target /var/www/frontend --deploy-dir dist \
+  --build-cmd "npm run build" --url https://myserver.com
+```
