@@ -1,0 +1,1146 @@
+#!/usr/bin/env bash
+# PipePilot - Bash CI/CD automation tool.
+#
+# This script implements the academic specification in
+# pipepilot_project_specification.md. The file is intentionally commented in
+# detail because the project is meant to demonstrate Linux shell concepts:
+# variables, functions, conditions, loops, process management, permissions,
+# redirections, compression, Git commands, and structured logs.
+
+set -Euo pipefail
+
+# ----------------------------- Exit codes ---------------------------------
+# Keeping exit codes as named constants makes the code easier to read and also
+# matches the error-management table from the specification.
+readonly OK=0
+readonly ERR_UNKNOWN_OPTION=100
+readonly ERR_MISSING_PARAMETER=101
+readonly ERR_PROJECT_NOT_FOUND=102
+readonly ERR_GIT=103
+readonly ERR_LINT=104
+readonly ERR_TEST=105
+readonly ERR_BUILD=106
+readonly ERR_DEPLOY=107
+readonly ERR_SMOKE=108
+readonly ERR_ROLLBACK=109
+readonly ERR_PERMISSION=110
+readonly ERR_ARCHIVE=111
+readonly ERR_CONFIG=112
+readonly ERR_DEPENDENCY=113
+readonly ERR_HOOK=114
+
+# --------------------------- Script locations ------------------------------
+# SCRIPT_DIR lets the program find configs, hooks, VERSION, and local runtime
+# directories even when the user launches PipePilot from another folder.
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+VERSION_FILE="$SCRIPT_DIR/VERSION"
+
+# --------------------------- Default settings ------------------------------
+# These values are loaded before configs/default.conf. The config file can
+# override them, and CLI options can override both.
+PROJECT_PATH=""
+REPO_URL=""
+COMMIT_HASH=""
+ENVIRONMENT=""
+BRANCH=""
+MODE="sequential"
+LOG_DIR=""
+ARCHIVE_DIR=""
+TARGET_PATH=""
+REMOTE_HOST=""
+REMOTE_USER=""
+RESTART_SERVICE=""
+SMOKE_URL=""
+SMOKE_PORT=""
+RETRIES=""
+TIMEOUT=""
+HEALTH_PATH=""
+COMPRESSION=""
+KEEP_ARCHIVES=""
+
+DRY_RUN=0
+VERBOSE=0
+ROLLBACK_ONLY=0
+SKIP_LINT=0
+STRICT=0
+LINT_TOOL=""
+SKIP_TESTS=0
+TEST_PATTERN=""
+FAIL_FAST=0
+COVERAGE=0
+SKIP_BUILD=0
+BUILD_CMD=""
+CLEAN=0
+INSTALL_DEPS=0
+NO_ARCHIVE=0
+
+# These flags let config files provide defaults while preserving explicit CLI
+# choices. Without them, configs sourced after argument parsing could overwrite
+# user-provided options such as --target or --host.
+CLI_LOG_DIR_SET=0
+CLI_ARCHIVE_DIR_SET=0
+CLI_TARGET_SET=0
+CLI_HOST_SET=0
+CLI_USER_SET=0
+CLI_RESTART_SET=0
+CLI_URL_SET=0
+CLI_PORT_SET=0
+CLI_RETRIES_SET=0
+CLI_TIMEOUT_SET=0
+CLI_HEALTH_PATH_SET=0
+CLI_COMPRESS_SET=0
+CLI_KEEP_SET=0
+
+LOG_FILE=""
+PROJECT_TYPE="unknown"
+LATEST_ARCHIVE=""
+DEPLOY_STARTED=0
+
+# ----------------------------- Help output ---------------------------------
+show_help() {
+    cat <<'HELP'
+NAME
+    pipepilot - Bash CI/CD automation tool for generic projects
+
+SYNOPSIS
+    pipepilot [OPTIONS] -p <project_path>
+
+DESCRIPTION
+    PipePilot automates the complete software deployment pipeline:
+    Git source recovery, static analysis, unit testing, build,
+    versioned archive, local/remote deployment, smoke tests,
+    and automatic rollback on failure.
+
+REQUIRED
+    -p <path>              Project path to deploy
+
+MAIN OPTIONS
+    -h                     Show this help and exit
+    --version              Show PipePilot version and exit
+    -f                     Fork mode: stages run in child processes
+    -t                     Thread mode: independent modules use background jobs
+    -s                     Subshell mode: pipeline runs in an isolated subshell
+    -l <dir>               Custom log directory
+    -r                     Restore previous archive [ADMIN REQUIRED]
+    -e <env>               Environment: staging | production
+    -b <branch>            Git branch to deploy, default: main
+    -d, --dry-run          Simulate deployment actions
+    -v                     Verbose mode
+
+GIT OPTIONS
+    --repo <url>           Clone repository if project path does not exist
+    --commit <hash>        Checkout a specific commit after pull/clone
+
+QUALITY OPTIONS
+    --skip-lint            Skip lint/static analysis
+    --strict               Treat warnings or missing optional tools as errors
+    --lint-tool <tool>     Use a specific lint tool
+    --skip-tests           Skip unit tests
+    --test-pattern <text>  Run tests whose path contains text
+    --fail-fast            Stop after the first failing test
+    --coverage             Request test coverage when supported
+
+BUILD OPTIONS
+    --skip-build           Skip build stage
+    --build-cmd "<cmd>"    Run a custom build command
+    --clean                Remove common old build directories before build
+    --install-deps         Install dependencies before build when supported
+
+ARCHIVE OPTIONS
+    --archive-dir <dir>    Custom archive directory
+    --no-archive           Skip archive creation
+    --keep <number>        Keep only latest N archives
+    --compress <type>      gzip | xz | zip
+
+DEPLOY OPTIONS
+    --host <server>        Remote deployment server
+    --user <username>      SSH username
+    --target <path>        Target deployment path
+    --restart <service>    Restart a service after deployment
+
+SMOKE TEST OPTIONS
+    --url <url>            URL for smoke test
+    --port <port>          Port for smoke test
+    --retries <number>     Number of smoke-test retries
+    --timeout <seconds>    Timeout for each smoke-test attempt
+    --health-path <path>   Health endpoint path appended to host URLs
+
+EXIT CODES
+    0    Pipeline completed successfully
+    100  Unknown option
+    101  Missing required parameter -p
+    102  Project directory not found
+    103  Git pull or clone failed
+    104  Lint failed
+    105  Unit tests failed
+    106  Build failed
+    107  Deployment failed
+    108  Smoke test failed
+    109  Rollback failed
+    110  Permission denied / admin required
+    111  Archive failed
+    112  Configuration failed
+    113  Required dependency missing
+    114  Hook failed
+
+EXAMPLES
+    ./pipepilot -p /srv/app -e staging
+    ./pipepilot -f -p /srv/app -e production -b develop
+    ./pipepilot -t -p /srv/app -e staging -v
+    sudo ./pipepilot -r -p /srv/app
+    ./pipepilot -d -p /srv/app -e production
+HELP
+}
+
+show_version() {
+    printf 'PipePilot %s\n' "$(pipepilot_version)"
+}
+
+pipepilot_version() {
+    # VERSION is allowed to contain comments for academic documentation. The
+    # actual version is the last non-empty, non-comment line.
+    if [[ -f "$VERSION_FILE" ]]; then
+        grep -Ev '^[[:space:]]*(#|$)' "$VERSION_FILE" | tail -n 1 | tr -d '[:space:]'
+    else
+        echo "unknown"
+    fi
+}
+
+# ----------------------------- Log helpers ---------------------------------
+ensure_log_file() {
+    mkdir -p "$LOG_DIR"
+    LOG_FILE="$LOG_DIR/history.log"
+    touch "$LOG_FILE"
+}
+
+timestamp() {
+    date "+%Y-%m-%d-%H-%M-%S"
+}
+
+log_info() {
+    local message="$1"
+    local entry
+    ensure_log_file
+    entry="$(timestamp) : ${USER:-unknown} : INFOS : $message"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "$entry"
+    fi
+    echo "$entry" >> "$LOG_FILE"
+}
+
+log_error() {
+    local message="$1"
+    local entry
+    ensure_log_file
+    entry="$(timestamp) : ${USER:-unknown} : ERROR : $message"
+    echo "$entry" >&2
+    echo "$entry" >> "$LOG_FILE"
+}
+
+die() {
+    local code="$1"
+    local message="$2"
+    log_error "$message -- code $code"
+    show_help
+    exit "$code"
+}
+
+require_command() {
+    local command_name="$1"
+    local code="${2:-$ERR_DEPENDENCY}"
+    command -v "$command_name" >/dev/null 2>&1 || die "$code" "[DEPENDENCY] Missing command: $command_name"
+}
+
+run_cmd() {
+    # This wrapper logs commands in verbose mode and implements dry-run behavior
+    # for steps that should be simulated without changing the system.
+    local description="$1"
+    shift
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[DRY-RUN] $description: $*"
+        return 0
+    fi
+    log_info "$description: $*"
+    "$@"
+}
+
+run_in_project() {
+    # Execute a command from PROJECT_PATH without permanently changing the
+    # caller's current directory.
+    ( cd "$PROJECT_PATH" && "$@" )
+}
+
+run_shell_in_project() {
+    local command_text="$1"
+    ( cd "$PROJECT_PATH" && bash -lc "$command_text" )
+}
+
+# ----------------------------- Configuration -------------------------------
+load_config_file() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        # shellcheck source=/dev/null
+        source "$file"
+    fi
+}
+
+load_configs() {
+    load_config_file "$SCRIPT_DIR/configs/default.conf"
+
+    ENVIRONMENT="${ENVIRONMENT:-${DEFAULT_ENV:-staging}}"
+    BRANCH="${BRANCH:-${DEFAULT_BRANCH:-main}}"
+    LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/${DEFAULT_LOG_DIR:-logs}}"
+    ARCHIVE_DIR="${ARCHIVE_DIR:-$SCRIPT_DIR/${DEFAULT_ARCHIVE_DIR:-archives}}"
+    TARGET_PATH="${TARGET_PATH:-$SCRIPT_DIR/${DEFAULT_TARGET:-deployments/staging}}"
+    RETRIES="${RETRIES:-${DEFAULT_RETRIES:-3}}"
+    TIMEOUT="${TIMEOUT:-${DEFAULT_TIMEOUT:-5}}"
+    HEALTH_PATH="${HEALTH_PATH:-${DEFAULT_HEALTH_PATH:-/}}"
+    COMPRESSION="${COMPRESSION:-${DEFAULT_COMPRESSION:-gzip}}"
+    KEEP_ARCHIVES="${KEEP_ARCHIVES:-${DEFAULT_KEEP_ARCHIVES:-5}}"
+
+    local env_file="$SCRIPT_DIR/configs/${ENVIRONMENT}.conf"
+    [[ -f "$env_file" ]] || die "$ERR_CONFIG" "[CONFIG] Missing environment config: $env_file"
+
+    local cli_target="$TARGET_PATH"
+    local cli_host="$REMOTE_HOST"
+    local cli_user="$REMOTE_USER"
+    local cli_restart="$RESTART_SERVICE"
+    local cli_url="$SMOKE_URL"
+    local cli_port="$SMOKE_PORT"
+
+    load_config_file "$env_file"
+
+    # Environment configs use descriptive names; copy them into runtime options
+    # only when the user did not already provide an explicit CLI value.
+    TARGET_PATH="${TARGET_PATH:-${DEFAULT_TARGET:-deployments/staging}}"
+    REMOTE_HOST="${REMOTE_HOST:-}"
+    REMOTE_USER="${REMOTE_USER:-}"
+    RESTART_SERVICE="${RESTART_SERVICE:-}"
+    SMOKE_URL="${SMOKE_URL:-}"
+    SMOKE_PORT="${SMOKE_PORT:-}"
+
+    [[ "$CLI_TARGET_SET" -eq 0 ]] || TARGET_PATH="$cli_target"
+    [[ "$CLI_HOST_SET" -eq 0 ]] || REMOTE_HOST="$cli_host"
+    [[ "$CLI_USER_SET" -eq 0 ]] || REMOTE_USER="$cli_user"
+    [[ "$CLI_RESTART_SET" -eq 0 ]] || RESTART_SERVICE="$cli_restart"
+    [[ "$CLI_URL_SET" -eq 0 ]] || SMOKE_URL="$cli_url"
+    [[ "$CLI_PORT_SET" -eq 0 ]] || SMOKE_PORT="$cli_port"
+}
+
+# ---------------------------- Option parsing -------------------------------
+need_value() {
+    local option="$1"
+    local value="${2:-}"
+    [[ -n "$value" && "$value" != -* ]] || die "$ERR_MISSING_PARAMETER" "[ARGS] Missing value for $option"
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                exit "$OK"
+                ;;
+            --version)
+                show_version
+                exit "$OK"
+                ;;
+            -f)
+                MODE="fork"
+                shift
+                ;;
+            -t)
+                MODE="thread"
+                shift
+                ;;
+            -s)
+                MODE="subshell"
+                shift
+                ;;
+            -l)
+                need_value "$1" "${2:-}"
+                LOG_DIR="$2"
+                CLI_LOG_DIR_SET=1
+                shift 2
+                ;;
+            -r)
+                ROLLBACK_ONLY=1
+                shift
+                ;;
+            -e)
+                need_value "$1" "${2:-}"
+                ENVIRONMENT="$2"
+                shift 2
+                ;;
+            -p)
+                need_value "$1" "${2:-}"
+                PROJECT_PATH="$2"
+                shift 2
+                ;;
+            -b)
+                need_value "$1" "${2:-}"
+                BRANCH="$2"
+                shift 2
+                ;;
+            -d|--dry-run)
+                DRY_RUN=1
+                shift
+                ;;
+            -v)
+                VERBOSE=1
+                shift
+                ;;
+            --repo)
+                need_value "$1" "${2:-}"
+                REPO_URL="$2"
+                shift 2
+                ;;
+            --commit)
+                need_value "$1" "${2:-}"
+                COMMIT_HASH="$2"
+                shift 2
+                ;;
+            --skip-lint)
+                SKIP_LINT=1
+                shift
+                ;;
+            --strict)
+                STRICT=1
+                shift
+                ;;
+            --lint-tool)
+                need_value "$1" "${2:-}"
+                LINT_TOOL="$2"
+                shift 2
+                ;;
+            --skip-tests)
+                SKIP_TESTS=1
+                shift
+                ;;
+            --test-pattern)
+                need_value "$1" "${2:-}"
+                TEST_PATTERN="$2"
+                shift 2
+                ;;
+            --fail-fast)
+                FAIL_FAST=1
+                shift
+                ;;
+            --coverage)
+                COVERAGE=1
+                shift
+                ;;
+            --skip-build)
+                SKIP_BUILD=1
+                shift
+                ;;
+            --build-cmd)
+                need_value "$1" "${2:-}"
+                BUILD_CMD="$2"
+                shift 2
+                ;;
+            --clean)
+                CLEAN=1
+                shift
+                ;;
+            --install-deps)
+                INSTALL_DEPS=1
+                shift
+                ;;
+            --archive-dir)
+                need_value "$1" "${2:-}"
+                ARCHIVE_DIR="$2"
+                CLI_ARCHIVE_DIR_SET=1
+                shift 2
+                ;;
+            --no-archive)
+                NO_ARCHIVE=1
+                shift
+                ;;
+            --keep)
+                need_value "$1" "${2:-}"
+                KEEP_ARCHIVES="$2"
+                CLI_KEEP_SET=1
+                shift 2
+                ;;
+            --compress)
+                need_value "$1" "${2:-}"
+                COMPRESSION="$2"
+                CLI_COMPRESS_SET=1
+                shift 2
+                ;;
+            --host)
+                need_value "$1" "${2:-}"
+                REMOTE_HOST="$2"
+                CLI_HOST_SET=1
+                shift 2
+                ;;
+            --user)
+                need_value "$1" "${2:-}"
+                REMOTE_USER="$2"
+                CLI_USER_SET=1
+                shift 2
+                ;;
+            --target)
+                need_value "$1" "${2:-}"
+                TARGET_PATH="$2"
+                CLI_TARGET_SET=1
+                shift 2
+                ;;
+            --restart)
+                need_value "$1" "${2:-}"
+                RESTART_SERVICE="$2"
+                CLI_RESTART_SET=1
+                shift 2
+                ;;
+            --url)
+                need_value "$1" "${2:-}"
+                SMOKE_URL="$2"
+                CLI_URL_SET=1
+                shift 2
+                ;;
+            --port)
+                need_value "$1" "${2:-}"
+                SMOKE_PORT="$2"
+                CLI_PORT_SET=1
+                shift 2
+                ;;
+            --retries)
+                need_value "$1" "${2:-}"
+                RETRIES="$2"
+                CLI_RETRIES_SET=1
+                shift 2
+                ;;
+            --timeout)
+                need_value "$1" "${2:-}"
+                TIMEOUT="$2"
+                CLI_TIMEOUT_SET=1
+                shift 2
+                ;;
+            --health-path)
+                need_value "$1" "${2:-}"
+                HEALTH_PATH="$2"
+                CLI_HEALTH_PATH_SET=1
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                die "$ERR_UNKNOWN_OPTION" "[ARGS] Unknown option: $1"
+                ;;
+            *)
+                die "$ERR_UNKNOWN_OPTION" "[ARGS] Unexpected argument: $1"
+                ;;
+        esac
+    done
+}
+
+normalize_paths() {
+    [[ -n "$PROJECT_PATH" ]] || die "$ERR_MISSING_PARAMETER" "[ARGS] Missing required -p <project_path>"
+    PROJECT_PATH="$(realpath -m "$PROJECT_PATH")"
+    LOG_DIR="$(realpath -m "$LOG_DIR")"
+    ARCHIVE_DIR="$(realpath -m "$ARCHIVE_DIR")"
+    if [[ "$TARGET_PATH" != *:* ]]; then
+        TARGET_PATH="$(realpath -m "$TARGET_PATH")"
+    fi
+}
+
+validate_options() {
+    case "$ENVIRONMENT" in
+        staging|production) ;;
+        *) die "$ERR_CONFIG" "[CONFIG] Invalid environment: $ENVIRONMENT" ;;
+    esac
+
+    case "$COMPRESSION" in
+        gzip|xz|zip) ;;
+        *) die "$ERR_CONFIG" "[CONFIG] Invalid compression type: $COMPRESSION" ;;
+    esac
+
+    [[ "$KEEP_ARCHIVES" =~ ^[0-9]+$ ]] || die "$ERR_CONFIG" "[CONFIG] --keep must be a number"
+    [[ "$RETRIES" =~ ^[0-9]+$ ]] || die "$ERR_CONFIG" "[CONFIG] --retries must be a number"
+    [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || die "$ERR_CONFIG" "[CONFIG] --timeout must be a number"
+
+    if [[ "$ENVIRONMENT" == "production" && "$DRY_RUN" -ne 1 && "${EUID:-$(id -u)}" -ne 0 ]]; then
+        die "$ERR_PERMISSION" "[PERMISSION] Production deployment requires root/admin rights"
+    fi
+
+    if [[ "$ROLLBACK_ONLY" -eq 1 && "$DRY_RUN" -ne 1 && "${EUID:-$(id -u)}" -ne 0 ]]; then
+        die "$ERR_PERMISSION" "[PERMISSION] Rollback requires root/admin rights"
+    fi
+}
+
+# ------------------------- Project type detection --------------------------
+detect_project_type() {
+    if [[ -f "$PROJECT_PATH/package.json" ]]; then
+        PROJECT_TYPE="node"
+    elif find "$PROJECT_PATH" -maxdepth 2 -name "*.py" -print -quit | grep -q .; then
+        PROJECT_TYPE="python"
+    elif find "$PROJECT_PATH" -maxdepth 2 -name "*.c" -print -quit | grep -q .; then
+        PROJECT_TYPE="c"
+    elif find "$PROJECT_PATH" -maxdepth 2 -name "*.sh" -print -quit | grep -q .; then
+        PROJECT_TYPE="shell"
+    else
+        PROJECT_TYPE="generic"
+    fi
+    log_info "[DETECT] Project type detected: $PROJECT_TYPE"
+}
+
+# ---------------------------- Pipeline stages ------------------------------
+stage_pull() {
+    log_info "[GIT] Starting source recovery"
+    require_command git "$ERR_GIT"
+
+    if [[ ! -d "$PROJECT_PATH" ]]; then
+        [[ -n "$REPO_URL" ]] || die "$ERR_PROJECT_NOT_FOUND" "[GIT] Project directory not found: $PROJECT_PATH"
+        run_cmd "[GIT] Clone repository" git clone --branch "$BRANCH" "$REPO_URL" "$PROJECT_PATH" || return "$ERR_GIT"
+    fi
+
+    if [[ -d "$PROJECT_PATH/.git" ]]; then
+        run_in_project git fetch --all --prune || return "$ERR_GIT"
+        run_in_project git checkout "$BRANCH" || return "$ERR_GIT"
+        run_in_project git pull --ff-only || return "$ERR_GIT"
+        if [[ -n "$COMMIT_HASH" ]]; then
+            run_in_project git checkout "$COMMIT_HASH" || return "$ERR_GIT"
+        fi
+        local current_branch commit_hash author
+        current_branch="$(run_in_project git branch --show-current || true)"
+        commit_hash="$(run_in_project git rev-parse --short HEAD || true)"
+        author="$(run_in_project git log -1 --pretty=format:'%an' || true)"
+        log_info "[GIT] Pull OK -- branch ${current_branch:-detached} -- commit ${commit_hash:-unknown} -- author ${author:-unknown}"
+    else
+        log_info "[GIT] No git repository found; using existing local project files"
+    fi
+
+    detect_project_type
+    return "$OK"
+}
+
+stage_lint() {
+    if [[ "$SKIP_LINT" -eq 1 ]]; then
+        log_info "[LINT] Skipped by --skip-lint"
+        return "$OK"
+    fi
+
+    log_info "[LINT] Starting static analysis"
+
+    if [[ -n "$LINT_TOOL" ]]; then
+        require_command "$LINT_TOOL" "$ERR_DEPENDENCY"
+        run_in_project "$LINT_TOOL" . || return "$ERR_LINT"
+        log_info "[LINT] Custom lint tool completed: $LINT_TOOL"
+        return "$OK"
+    fi
+
+    case "$PROJECT_TYPE" in
+        shell)
+            local shell_file
+            while IFS= read -r shell_file; do
+                bash -n "$shell_file" || return "$ERR_LINT"
+                if command -v shellcheck >/dev/null 2>&1; then
+                    shellcheck "$shell_file" || return "$ERR_LINT"
+                elif [[ "$STRICT" -eq 1 ]]; then
+                    return "$ERR_DEPENDENCY"
+                fi
+            done < <(find "$PROJECT_PATH" -type f -name "*.sh")
+            ;;
+        python)
+            local py_file
+            while IFS= read -r py_file; do
+                python3 -m py_compile "$py_file" || return "$ERR_LINT"
+                if command -v pylint >/dev/null 2>&1; then
+                    pylint "$py_file" || return "$ERR_LINT"
+                fi
+            done < <(find "$PROJECT_PATH" -type f -name "*.py")
+            ;;
+        c)
+            local c_file
+            require_command gcc "$ERR_DEPENDENCY"
+            while IFS= read -r c_file; do
+                gcc -Wall -fsyntax-only "$c_file" || return "$ERR_LINT"
+            done < <(find "$PROJECT_PATH" -type f -name "*.c")
+            ;;
+        node)
+            if [[ -f "$PROJECT_PATH/package.json" ]] && command -v npm >/dev/null 2>&1; then
+                if run_shell_in_project "npm run | grep -q '^  lint'"; then
+                    run_shell_in_project "npm run lint" || return "$ERR_LINT"
+                else
+                    log_info "[LINT] package.json has no lint script; skipping"
+                fi
+            else
+                [[ "$STRICT" -eq 0 ]] || return "$ERR_DEPENDENCY"
+            fi
+            ;;
+        *)
+            log_info "[LINT] No known lint strategy for generic project; skipping"
+            ;;
+    esac
+
+    log_info "[LINT] No syntax errors detected"
+    return "$OK"
+}
+
+stage_test() {
+    if [[ "$SKIP_TESTS" -eq 1 ]]; then
+        log_info "[TEST] Skipped by --skip-tests"
+        return "$OK"
+    fi
+
+    log_info "[TEST] Starting unit tests"
+    local passed=0
+    local failed=0
+
+    case "$PROJECT_TYPE" in
+        shell|generic)
+            local test_file
+            while IFS= read -r test_file; do
+                [[ -z "$TEST_PATTERN" || "$test_file" == *"$TEST_PATTERN"* ]] || continue
+                if bash "$test_file"; then
+                    passed=$((passed + 1))
+                else
+                    failed=$((failed + 1))
+                    [[ "$FAIL_FAST" -eq 0 ]] || return "$ERR_TEST"
+                fi
+            done < <(find "$PROJECT_PATH" -type f \( -path "*/tests/test_*.sh" -o -name "test_*.sh" \))
+            ;;
+        python)
+            if command -v pytest >/dev/null 2>&1; then
+                local coverage_arg=""
+                [[ "$COVERAGE" -eq 0 ]] || coverage_arg="--cov=."
+                run_shell_in_project "pytest $coverage_arg" || return "$ERR_TEST"
+                passed=1
+            else
+                local test_py
+                while IFS= read -r test_py; do
+                    [[ -z "$TEST_PATTERN" || "$test_py" == *"$TEST_PATTERN"* ]] || continue
+                    if python3 "$test_py"; then
+                        passed=$((passed + 1))
+                    else
+                        failed=$((failed + 1))
+                        [[ "$FAIL_FAST" -eq 0 ]] || return "$ERR_TEST"
+                    fi
+                done < <(find "$PROJECT_PATH" -type f -name "test_*.py")
+            fi
+            ;;
+        node)
+            if command -v npm >/dev/null 2>&1; then
+                run_shell_in_project "npm test" || return "$ERR_TEST"
+                passed=1
+            fi
+            ;;
+        c)
+            if [[ -f "$PROJECT_PATH/Makefile" || -f "$PROJECT_PATH/makefile" ]]; then
+                run_shell_in_project "make test" || return "$ERR_TEST"
+                passed=1
+            else
+                log_info "[TEST] No Makefile test target detected; skipping"
+            fi
+            ;;
+    esac
+
+    [[ "$failed" -eq 0 ]] || return "$ERR_TEST"
+    log_info "[TEST] $passed tests passed successfully"
+    return "$OK"
+}
+
+stage_build() {
+    if [[ "$SKIP_BUILD" -eq 1 ]]; then
+        log_info "[BUILD] Skipped by --skip-build"
+        return "$OK"
+    fi
+
+    log_info "[BUILD] Starting build"
+
+    if [[ "$CLEAN" -eq 1 ]]; then
+        run_shell_in_project "rm -rf build dist out target" || return "$ERR_BUILD"
+        log_info "[BUILD] Cleaned old build directories"
+    fi
+
+    if [[ "$INSTALL_DEPS" -eq 1 ]]; then
+        case "$PROJECT_TYPE" in
+            node)
+                require_command npm "$ERR_DEPENDENCY"
+                run_shell_in_project "npm install" || return "$ERR_BUILD"
+                ;;
+            python)
+                if [[ -f "$PROJECT_PATH/requirements.txt" ]]; then
+                    require_command python3 "$ERR_DEPENDENCY"
+                    run_shell_in_project "python3 -m pip install -r requirements.txt" || return "$ERR_BUILD"
+                fi
+                ;;
+        esac
+    fi
+
+    if [[ -n "$BUILD_CMD" ]]; then
+        run_shell_in_project "$BUILD_CMD" || return "$ERR_BUILD"
+    elif [[ -x "$PROJECT_PATH/build.sh" ]]; then
+        run_shell_in_project "./build.sh" || return "$ERR_BUILD"
+    elif [[ -f "$PROJECT_PATH/Makefile" || -f "$PROJECT_PATH/makefile" ]]; then
+        run_shell_in_project "make" || return "$ERR_BUILD"
+    else
+        case "$PROJECT_TYPE" in
+            node)
+                require_command npm "$ERR_DEPENDENCY"
+                run_shell_in_project "npm install && npm run build" || return "$ERR_BUILD"
+                ;;
+            python)
+                if [[ -f "$PROJECT_PATH/requirements.txt" ]]; then
+                    run_shell_in_project "python3 -m pip install -r requirements.txt" || return "$ERR_BUILD"
+                fi
+                ;;
+            c)
+                if [[ -f "$PROJECT_PATH/main.c" ]]; then
+                    require_command gcc "$ERR_DEPENDENCY"
+                    run_shell_in_project "gcc main.c -o app" || return "$ERR_BUILD"
+                fi
+                ;;
+            *)
+                log_info "[BUILD] No build command needed for this project type"
+                ;;
+        esac
+    fi
+
+    log_info "[BUILD] Build successful -- artifact generated"
+    return "$OK"
+}
+
+archive_extension() {
+    case "$COMPRESSION" in
+        gzip) echo "tar.gz" ;;
+        xz) echo "tar.xz" ;;
+        zip) echo "zip" ;;
+    esac
+}
+
+cleanup_old_archives() {
+    [[ "$KEEP_ARCHIVES" -gt 0 ]] || return 0
+    find "$ARCHIVE_DIR" -maxdepth 1 -type f -name "$(basename "$PROJECT_PATH")-*.*" \
+        | sort -r \
+        | awk "NR>$KEEP_ARCHIVES" \
+        | while IFS= read -r old_archive; do
+            rm -f "$old_archive"
+            log_info "[ARCHIVE] Removed old archive $old_archive"
+        done
+}
+
+stage_archive() {
+    if [[ "$NO_ARCHIVE" -eq 1 ]]; then
+        log_info "[ARCHIVE] Skipped by --no-archive"
+        return "$OK"
+    fi
+
+    mkdir -p "$ARCHIVE_DIR"
+    local project_name archive_name parent_dir base_name
+    project_name="$(basename "$PROJECT_PATH")"
+    archive_name="${project_name}-$(timestamp)-v$(pipepilot_version).$(archive_extension)"
+    LATEST_ARCHIVE="$ARCHIVE_DIR/$archive_name"
+    parent_dir="$(dirname "$PROJECT_PATH")"
+    base_name="$(basename "$PROJECT_PATH")"
+
+    case "$COMPRESSION" in
+        gzip)
+            tar -czf "$LATEST_ARCHIVE" -C "$parent_dir" --exclude="$base_name/.git" "$base_name" || return "$ERR_ARCHIVE"
+            ;;
+        xz)
+            tar -cJf "$LATEST_ARCHIVE" -C "$parent_dir" --exclude="$base_name/.git" "$base_name" || return "$ERR_ARCHIVE"
+            ;;
+        zip)
+            require_command zip "$ERR_DEPENDENCY"
+            ( cd "$parent_dir" && zip -qr "$LATEST_ARCHIVE" "$base_name" -x "$base_name/.git/*" ) || return "$ERR_ARCHIVE"
+            ;;
+    esac
+
+    cleanup_old_archives
+    log_info "[ARCHIVE] $archive_name created"
+    return "$OK"
+}
+
+run_hook() {
+    local hook_name="$1"
+    local hook_path="$SCRIPT_DIR/hooks/$hook_name"
+    if [[ -x "$hook_path" ]]; then
+        run_cmd "[HOOK] Running $hook_name" "$hook_path" || return "$ERR_HOOK"
+    else
+        log_info "[HOOK] $hook_name not executable or not present; skipping"
+    fi
+}
+
+deployment_source() {
+    if [[ -d "$PROJECT_PATH/build" ]]; then
+        echo "$PROJECT_PATH/build"
+    elif [[ -d "$PROJECT_PATH/dist" ]]; then
+        echo "$PROJECT_PATH/dist"
+    elif [[ -d "$PROJECT_PATH/public" ]]; then
+        echo "$PROJECT_PATH/public"
+    else
+        echo "$PROJECT_PATH"
+    fi
+}
+
+copy_local() {
+    local source_dir="$1"
+    mkdir -p "$TARGET_PATH"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete "$source_dir"/ "$TARGET_PATH"/
+    else
+        cp -a "$source_dir"/. "$TARGET_PATH"/
+    fi
+}
+
+copy_remote() {
+    local source_dir="$1"
+    local remote_prefix=""
+    [[ -n "$REMOTE_HOST" ]] || return "$ERR_DEPLOY"
+    [[ -n "$REMOTE_USER" ]] && remote_prefix="${REMOTE_USER}@"
+
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -az --delete "$source_dir"/ "${remote_prefix}${REMOTE_HOST}:$TARGET_PATH"/
+    else
+        scp -r "$source_dir"/. "${remote_prefix}${REMOTE_HOST}:$TARGET_PATH"/
+    fi
+}
+
+stage_deploy() {
+    log_info "[DEPLOY] Starting $ENVIRONMENT deployment"
+    DEPLOY_STARTED=1
+
+    run_hook "pre-deploy.sh" || return "$ERR_HOOK"
+
+    local source_dir
+    source_dir="$(deployment_source)"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[DEPLOY] Dry-run deployment from $source_dir to $TARGET_PATH"
+    elif [[ -n "$REMOTE_HOST" ]]; then
+        copy_remote "$source_dir" || return "$ERR_DEPLOY"
+    else
+        copy_local "$source_dir" || return "$ERR_DEPLOY"
+    fi
+
+    if [[ -n "$RESTART_SERVICE" ]]; then
+        if [[ -n "$REMOTE_HOST" ]]; then
+            local remote_prefix=""
+            [[ -n "$REMOTE_USER" ]] && remote_prefix="${REMOTE_USER}@"
+            run_cmd "[DEPLOY] Restart remote service" ssh "${remote_prefix}${REMOTE_HOST}" "systemctl restart $RESTART_SERVICE" || return "$ERR_DEPLOY"
+        else
+            run_cmd "[DEPLOY] Restart local service" systemctl restart "$RESTART_SERVICE" || return "$ERR_DEPLOY"
+        fi
+    fi
+
+    run_hook "post-deploy.sh" || return "$ERR_HOOK"
+    log_info "[DEPLOY] ${ENVIRONMENT^} deployment completed successfully"
+    return "$OK"
+}
+
+smoke_url() {
+    if [[ -n "$SMOKE_URL" ]]; then
+        echo "$SMOKE_URL"
+    elif [[ -n "$REMOTE_HOST" && "$HEALTH_PATH" != "/" ]]; then
+        echo "http://$REMOTE_HOST$HEALTH_PATH"
+    else
+        echo ""
+    fi
+}
+
+stage_smoke() {
+    log_info "[SMOKE] Starting post-deployment verification"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[SMOKE] Dry-run smoke test skipped"
+        return "$OK"
+    fi
+
+    local attempt url
+    url="$(smoke_url)"
+
+    if [[ -z "$url" && -z "$SMOKE_PORT" ]]; then
+        log_info "[SMOKE] No URL or port configured; smoke test considered informational"
+        return "$OK"
+    fi
+
+    for ((attempt=1; attempt<=RETRIES; attempt++)); do
+        if [[ -n "$url" ]]; then
+            if command -v curl >/dev/null 2>&1 && curl -fsS --max-time "$TIMEOUT" "$url" >/dev/null; then
+                log_info "[SMOKE] URL reachable: $url"
+                return "$OK"
+            fi
+        fi
+
+        if [[ -n "$SMOKE_PORT" ]]; then
+            local host="${REMOTE_HOST:-localhost}"
+            if command -v nc >/dev/null 2>&1 && nc -z -w "$TIMEOUT" "$host" "$SMOKE_PORT"; then
+                log_info "[SMOKE] Port reachable: $host:$SMOKE_PORT"
+                return "$OK"
+            fi
+        fi
+
+        log_info "[SMOKE] Attempt $attempt/$RETRIES failed; retrying"
+        sleep 1
+    done
+
+    log_error "[SMOKE] Verification failed"
+    rollback_after_failure
+    return "$ERR_SMOKE"
+}
+
+# ------------------------------ Rollback -----------------------------------
+latest_archive_file() {
+    find "$ARCHIVE_DIR" -maxdepth 1 -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.zip" \) \
+        | sort \
+        | tail -n 1
+}
+
+restore_archive() {
+    local archive="$1"
+    [[ -f "$archive" ]] || return "$ERR_ROLLBACK"
+    mkdir -p "$TARGET_PATH"
+
+    case "$archive" in
+        *.tar.gz)
+            tar -xzf "$archive" -C "$TARGET_PATH" --strip-components=1 || return "$ERR_ROLLBACK"
+            ;;
+        *.tar.xz)
+            tar -xJf "$archive" -C "$TARGET_PATH" --strip-components=1 || return "$ERR_ROLLBACK"
+            ;;
+        *.zip)
+            require_command unzip "$ERR_DEPENDENCY"
+            unzip -oq "$archive" -d "$TARGET_PATH" || return "$ERR_ROLLBACK"
+            ;;
+        *)
+            return "$ERR_ROLLBACK"
+            ;;
+    esac
+}
+
+rollback_after_failure() {
+    [[ "$DEPLOY_STARTED" -eq 1 || -n "$LATEST_ARCHIVE" ]] || return 0
+    log_info "[ROLLBACK] Restoring previous version"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[ROLLBACK] Dry-run rollback simulated"
+        return 0
+    fi
+    local archive="${LATEST_ARCHIVE:-$(latest_archive_file)}"
+    restore_archive "$archive" || log_error "[ROLLBACK] Restore failed"
+}
+
+manual_rollback() {
+    log_info "[ROLLBACK] Manual rollback requested"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[ROLLBACK] Dry-run rollback simulated"
+        return "$OK"
+    fi
+    local archive
+    archive="$(latest_archive_file)"
+    [[ -n "$archive" ]] || die "$ERR_ROLLBACK" "[ROLLBACK] No archive available"
+    restore_archive "$archive" || die "$ERR_ROLLBACK" "[ROLLBACK] Restore failed"
+    log_info "[ROLLBACK] Restored archive $archive"
+    return "$OK"
+}
+
+# --------------------------- Execution modes -------------------------------
+run_stage_or_die() {
+    local stage_name="$1"
+    local error_code="$2"
+    shift 2
+    "$@" || {
+        local status=$?
+        [[ "$status" -ne 0 ]] || status="$error_code"
+        rollback_after_failure
+        die "$error_code" "[$stage_name] Stage failed"
+    }
+}
+
+run_sequential_pipeline() {
+    run_stage_or_die "GIT" "$ERR_GIT" stage_pull
+    run_stage_or_die "LINT" "$ERR_LINT" stage_lint
+    run_stage_or_die "TEST" "$ERR_TEST" stage_test
+    run_stage_or_die "BUILD" "$ERR_BUILD" stage_build
+    run_stage_or_die "ARCHIVE" "$ERR_ARCHIVE" stage_archive
+    run_stage_or_die "DEPLOY" "$ERR_DEPLOY" stage_deploy
+    run_stage_or_die "SMOKE" "$ERR_SMOKE" stage_smoke
+}
+
+run_subshell_pipeline() {
+    log_info "[MODE] Running pipeline in subshell mode"
+    (
+        run_sequential_pipeline
+    )
+}
+
+run_fork_stage() {
+    local stage_name="$1"
+    local error_code="$2"
+    shift 2
+    "$@" &
+    local pid=$!
+    log_info "[MODE] Forked $stage_name with PID $pid"
+    wait "$pid" || {
+        rollback_after_failure
+        die "$error_code" "[$stage_name] Forked stage failed"
+    }
+}
+
+run_fork_pipeline() {
+    log_info "[MODE] Running pipeline in fork mode"
+    run_fork_stage "GIT" "$ERR_GIT" stage_pull
+    run_fork_stage "LINT" "$ERR_LINT" stage_lint
+    run_fork_stage "TEST" "$ERR_TEST" stage_test
+    run_fork_stage "BUILD" "$ERR_BUILD" stage_build
+    run_fork_stage "ARCHIVE" "$ERR_ARCHIVE" stage_archive
+    LATEST_ARCHIVE="$(latest_archive_file || true)"
+    DEPLOY_STARTED=1
+    run_fork_stage "DEPLOY" "$ERR_DEPLOY" stage_deploy
+    run_fork_stage "SMOKE" "$ERR_SMOKE" stage_smoke
+}
+
+run_thread_pipeline() {
+    # Pull must finish before quality/build checks because it prepares the
+    # source tree. Lint and tests are then safe to run in parallel for the
+    # academic "thread simulation" requirement.
+    log_info "[MODE] Running pipeline in thread simulation mode"
+    run_stage_or_die "GIT" "$ERR_GIT" stage_pull
+
+    stage_lint &
+    local lint_pid=$!
+    stage_test &
+    local test_pid=$!
+    log_info "[MODE] Background jobs started: lint=$lint_pid test=$test_pid"
+
+    wait "$lint_pid" || die "$ERR_LINT" "[LINT] Threaded lint failed"
+    wait "$test_pid" || die "$ERR_TEST" "[TEST] Threaded tests failed"
+
+    run_stage_or_die "BUILD" "$ERR_BUILD" stage_build
+    run_stage_or_die "ARCHIVE" "$ERR_ARCHIVE" stage_archive
+    run_stage_or_die "DEPLOY" "$ERR_DEPLOY" stage_deploy
+    run_stage_or_die "SMOKE" "$ERR_SMOKE" stage_smoke
+}
+
+run_pipeline() {
+    log_info "[START] Pipeline started -- $PROJECT_PATH"
+    case "$MODE" in
+        sequential) run_sequential_pipeline ;;
+        subshell) run_subshell_pipeline ;;
+        fork) run_fork_pipeline ;;
+        thread) run_thread_pipeline ;;
+        *) die "$ERR_CONFIG" "[MODE] Invalid execution mode: $MODE" ;;
+    esac
+    log_info "[END] Pipeline completed successfully"
+}
+
+main() {
+    parse_args "$@"
+    load_configs
+    normalize_paths
+    validate_options
+    ensure_log_file
+
+    if [[ "$ROLLBACK_ONLY" -eq 1 ]]; then
+        manual_rollback
+        exit "$OK"
+    fi
+
+    run_pipeline
+}
+
+main "$@"
