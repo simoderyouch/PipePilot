@@ -50,3 +50,19 @@ yyyy-mm-dd-hh-mm-ss : username : ERROR : message
 By default, logs are written to `logs/history.log`. Use `-l <dir>` for a custom
 location.
 
+## Pipeline Stage Files
+
+Each pipeline step is stored in its own file under `stages/`:
+
+```text
+01_pull.sh     Pull or clone source code
+02_lint.sh     Run static analysis
+03_test.sh     Execute unit tests
+04_build.sh    Build or package the project
+05_archive.sh  Create rollback archive
+06_deploy.sh   Deploy locally or remotely
+07_smoke.sh    Verify deployment health
+```
+
+The main `pipepilot` file handles arguments, configuration, logging, rollback,
+and execution modes, then sources these stage files.

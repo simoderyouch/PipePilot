@@ -4,6 +4,15 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.2.0] - 2026-04-30
+
+### Changed
+
+- Split the seven CI/CD pipeline steps into separate files under `stages/`.
+- Kept `pipepilot` as the CLI, configuration, logging, rollback, and execution
+  mode orchestrator.
+- Documented the new stage-file layout in the README and usage guide.
+
 ## [0.1.0] - 2026-04-30
 
 ### Added

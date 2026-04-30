@@ -28,6 +28,7 @@ chmod +x pipepilot
 
 ```text
 configs/     Environment configuration files
+stages/      One Bash file for each of the seven pipeline steps
 hooks/       Pre-deploy and post-deploy extension scripts
 tests/       Three runnable academic test scenarios
 archives/    Runtime rollback archives
