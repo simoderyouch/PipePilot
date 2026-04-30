@@ -35,6 +35,7 @@ readonly ERR_HOOK=114
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
+LOGO_IMAGE="$SCRIPT_DIR/assets/pipepilot_logo.png"
 
 # --------------------------- Default settings ------------------------------
 # These values are loaded before configs/default.conf. The config file can
@@ -254,6 +255,12 @@ pipepilot_version() {
 }
 
 show_banner() {
+    if show_logo_image; then
+        printf '\n'
+        printf 'Automate. Validate. Deploy. Rollback safely.\n'
+        return
+    fi
+
     cat <<'BANNER'
  ____  _            ____  _ _       _
 |  _ \(_)_ __   ___|  _ \(_) | ___ | |_
@@ -263,6 +270,96 @@ show_banner() {
         |_|
 Automate. Validate. Deploy. Rollback safely.
 BANNER
+}
+
+show_logo_image() {
+    # Terminals cannot all print PNG files directly, so PipePilot uses the
+    # project logo image when a supported image renderer is available and keeps
+    # the ASCII banner as the portable fallback.
+    [[ -f "$LOGO_IMAGE" ]] || return 1
+    [[ -t 1 ]] || return 1
+
+    if command -v chafa >/dev/null 2>&1; then
+        chafa --size=70x16 "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if command -v viu >/dev/null 2>&1; then
+        viu -w 70 "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if command -v imgcat >/dev/null 2>&1; then
+        imgcat -W 70 "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if [[ -n "${WEZTERM_EXECUTABLE:-}" ]] && command -v wezterm >/dev/null 2>&1; then
+        wezterm imgcat --width 70 "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if [[ -n "${KITTY_WINDOW_ID:-}" ]] && command -v kitty >/dev/null 2>&1; then
+        kitty +kitten icat \
+            --align left \
+            --place 70x16@0x0 \
+            --transfer-mode file \
+            "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if command -v magick >/dev/null 2>&1; then
+        show_logo_with_imagemagick magick "$LOGO_IMAGE"
+        return $?
+    fi
+
+    if command -v convert >/dev/null 2>&1; then
+        show_logo_with_imagemagick convert "$LOGO_IMAGE"
+        return $?
+    fi
+
+    return 1
+}
+
+show_logo_with_imagemagick() {
+    # ImageMagick gives a dependency-light fallback for normal terminals: it
+    # samples the PNG and paints a compact true-color terminal preview using
+    # ANSI background colors.
+    local imagemagick_command="$1"
+    local image_path="$2"
+    local logo_width="${PIPEPILOT_LOGO_WIDTH:-38}"
+    local logo_height="${PIPEPILOT_LOGO_HEIGHT:-10}"
+
+    [[ "$logo_width" =~ ^[0-9]+$ ]] || logo_width=38
+    [[ "$logo_height" =~ ^[0-9]+$ ]] || logo_height=10
+
+    "$imagemagick_command" "$image_path" \
+        -fuzz 8% -trim +repage \
+        -resize "${logo_width}x${logo_height}" \
+        -background white -gravity center -extent "${logo_width}x${logo_height}" \
+        txt:- 2>/dev/null | awk -F'[:,() ]+' '
+            NR == 1 { next }
+            {
+                y = $2 + 0
+                r = int($3 + 0)
+                g = int($4 + 0)
+                b = int($5 + 0)
+
+                if (NR > 2 && y != current_y) {
+                    printf "\033[0m\n"
+                }
+                current_y = y
+
+                if (r > 245 && g > 245 && b > 245) {
+                    printf "\033[0m  "
+                } else {
+                    printf "\033[48;2;%d;%d;%dm  ", r, g, b
+                }
+            }
+            END {
+                printf "\033[0m\n"
+            }
+        '
 }
 
 # ----------------------------- Log helpers ---------------------------------

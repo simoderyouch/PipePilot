@@ -1,6 +1,6 @@
 # PipePilot
 
-![PipePilot logo](assets/logo.svg)
+![PipePilot logo](assets/pipepilot_banner.png)
 
 **Automate. Validate. Deploy. Rollback safely.**
 
@@ -56,6 +56,8 @@ Local machine:
 - `rsync` or `scp` for remote deployment
 - Node.js/npm for Node projects
 - Python 3 for Python projects
+- Optional terminal logo renderers: `chafa`, `viu`, `imgcat`, Kitty, WezTerm,
+  or ImageMagick
 
 Remote server:
 
@@ -252,7 +254,7 @@ PipePilot/
 ├── hooks/                     # Pre/post deploy extension points
 ├── tests/                     # Runnable deployment scenarios
 ├── docs/                      # Usage and versioning notes
-├── assets/logo.svg            # Project logo
+├── assets/                    # GitHub and CLI logo images
 ├── VERSION
 └── CHANGELOG.md
 ```

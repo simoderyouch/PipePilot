@@ -4,6 +4,15 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.7.3] - 2026-04-30
+
+### Changed
+
+- Updated the CLI startup banner to use `assets/pipepilot_logo.png` when the
+  user's terminal has a supported image renderer.
+- Added the PNG logo assets used by GitHub and the command-line interface.
+- Updated project structure documentation to match the current logo assets.
+
 ## [0.7.2] - 2026-04-30
 
 ### Changed
