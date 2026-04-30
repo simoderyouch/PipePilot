@@ -4,6 +4,17 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.7.0] - 2026-04-30
+
+### Added
+
+- GitHub-ready SVG logo.
+- Terminal startup banner for the PipePilot CLI.
+
+### Changed
+
+- Updated public wording to present PipePilot as a professional CI/CD tool.
+
 ## [0.6.0] - 2026-04-30
 
 ### Added
@@ -59,7 +70,7 @@ semantic version numbers from `VERSION`.
 
 - Initial repository identity for PipePilot.
 - Project structure for configs, hooks, tests, archives, logs, and docs.
-- Versioning files for teacher-visible release history.
+- Versioning files for release history.
 - Fully commented PipePilot Bash CLI.
-- Three runnable academic test scenarios.
+- Three runnable pipeline scenarios.
 - Usage and scenario documentation.

@@ -31,5 +31,4 @@ repository always show the same release number.
 
 Versioning makes deployments safer because every archive, rollback, and log line
 can be linked to a known project release. It also demonstrates professional
-software lifecycle management for the academic project.
-
+software lifecycle management.

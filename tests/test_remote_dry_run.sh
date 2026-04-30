@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Extra scenario - Remote deployment dry run.
 # This test proves that the new SSH deployment options are parsed and validated
-# without needing a real VPS, school server, or cloud VM. A temporary fake key is
+# without needing a real VPS or cloud VM. A temporary fake key is
 # enough because --dry-run prevents actual ssh/scp/rsync execution. It also
 # exercises smart fresh-server setup with --setup-server.
 

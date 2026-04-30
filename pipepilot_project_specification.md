@@ -1,7 +1,7 @@
 # PipePilot — Detailed Project Specification
 
-> **Original project context:** This document is based on the provided mini-project PDF for a Bash CI/CD automation tool.  
-> The app name has been improved from `deploymaster` to **PipePilot**, while keeping the same academic requirements, Linux concepts, options, error handling, logging format, execution modes, and 7-step deployment pipeline.
+> **Project context:** This document describes PipePilot as a Bash CI/CD automation tool.  
+> The app name has been improved from `deploymaster` to **PipePilot**, while keeping the same Linux concepts, options, error handling, logging format, execution modes, and 7-step deployment pipeline.
 
 ---
 
@@ -50,13 +50,13 @@ It can:
 
 ### 2.1 Project Type
 
-**Mini Project — Operating Systems / Linux / Unix / Windows**
+**Bash CI/CD Automation Tool**
 
 ### 2.2 Main Objective
 
 The goal of the project is to create a real Bash program that demonstrates Linux system concepts through a useful DevOps automation tool.
 
-The program must respect the requirements from the PDF:
+The program must respect the core requirements:
 
 - Use Bash scripts.
 - Use a required parameter.
@@ -612,7 +612,7 @@ pipepilot -p ./myapp --keep 5
 
 ### 8.5.4 Error Code
 
-The PDF already includes rollback error code `109`.
+The rollback system uses error code `109`.
 
 You can add an optional archive-specific error code:
 
@@ -851,7 +851,7 @@ If the smoke test fails, PipePilot automatically restores the previous archived 
 |---|---|---:|---:|
 | `-p <path>` | Project path to deploy | Yes | No |
 
-## 9.2 Main Options from the PDF
+## 9.2 Main Options
 
 | Option | Description | Admin Required |
 |---|---|---:|
@@ -1063,7 +1063,7 @@ pipepilot -p ./myapp -l ./logs
 
 ## 11.2 Required Log Format
 
-The project must respect the PDF format:
+The project must respect this log format:
 
 ```text
 yyyy-mm-dd-hh-mm-ss : username : INFOS : message
@@ -1111,7 +1111,7 @@ log_error() {
 
 # 12. Error Management
 
-## 12.1 Error Codes Required by the PDF
+## 12.1 Error Codes
 
 | Code | Name | Description |
 |---:|---|---|
@@ -1530,7 +1530,7 @@ pipepilot -t -p /home/user/myapp -e staging -v
 
 # 20. Final Recommendation
 
-For the academic project, use this identity:
+Use this product identity:
 
 ```text
 Project Name: PipePilot
@@ -1544,13 +1544,13 @@ However, inside the report, you can mention:
 PipePilot is the improved name of the original deploymaster concept.
 ```
 
-This keeps the project aligned with the PDF while giving it a more modern and memorable identity.
+This keeps the project aligned with the required pipeline while giving it a modern and memorable identity.
 
 ---
 
 # 21. Final Summary
 
-**PipePilot** is a complete Bash-based CI/CD automation tool that respects the mini-project requirements.
+**PipePilot** is a complete Bash-based CI/CD automation tool for frontend and backend deployments.
 
 It includes:
 

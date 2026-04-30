@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all academic PipePilot scenarios.
+# Run all PipePilot scenarios.
 # This wrapper is useful during demonstrations because it executes the light,
 # medium, and heavy cases in the same order as the specification.
 

@@ -1,9 +1,11 @@
 # PipePilot
 
+![PipePilot logo](assets/logo.svg)
+
 **Automate. Validate. Deploy. Rollback safely.**
 
-PipePilot is a Bash-based CI/CD automation tool for academic Linux and operating
-systems practice. The project automates a seven-step deployment pipeline:
+PipePilot is a Bash-based CI/CD automation tool for frontend and backend
+projects. It automates a production-style seven-step deployment pipeline:
 
 1. Pull source code
 2. Lint/static analysis
@@ -30,7 +32,7 @@ chmod +x pipepilot
 configs/     Environment configuration files
 stages/      One Bash file for each of the seven pipeline steps
 hooks/       Pre-deploy and post-deploy extension scripts
-tests/       Three runnable academic test scenarios
+tests/       Runnable pipeline and deployment scenarios
 archives/    Runtime rollback archives
 logs/        Runtime history.log output
 docs/        Usage, tests, and versioning notes
