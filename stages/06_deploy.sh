@@ -2,9 +2,8 @@
 # Step 6 - Deploy / Local or Remote Deployment.
 #
 # This file moves the build output to the target environment. It supports both
-# local deployment and explicit SSH remote deployment with --remote, --host,
-# --user, --key, --target, --deploy-dir, --remote-cmd, --restart, and
-# --transfer.
+# local deployment, explicit SSH remote deployment, and optional fresh-server
+# provisioning with --setup-server.
 
 run_hook() {
     local hook_name="$1"
@@ -72,6 +71,15 @@ ssh_remote() {
     ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "$command_text"
 }
 
+ssh_remote_script() {
+    # Send a multi-line Bash script through SSH. This is used for fresh-server
+    # setup because package-manager detection and conditional nginx setup are
+    # easier to read as a script than as one long command line.
+    local script_text="$1"
+    require_command ssh "$ERR_DEPENDENCY"
+    ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<< "$script_text"
+}
+
 validate_remote_config() {
     [[ "$REMOTE_MODE" -eq 1 ]] || return "$OK"
 
@@ -94,6 +102,215 @@ validate_remote_config() {
     fi
 }
 
+effective_app_kind() {
+    # `auto` turns the local project detection into a deployment-oriented kind.
+    # For example, a Node project that uploads dist/ is usually a frontend,
+    # while a Node project with an app port is usually a backend service.
+    if [[ "$APP_KIND" != "auto" ]]; then
+        echo "$APP_KIND"
+        return 0
+    fi
+
+    if [[ -n "$DEPLOY_DIR" && "$DEPLOY_DIR" =~ (^|/)(dist|build|public)$ ]]; then
+        echo "frontend"
+    elif [[ -n "$APP_PORT" && "$PROJECT_TYPE" == "node" ]]; then
+        echo "node"
+    elif [[ "$PROJECT_TYPE" == "node" ]]; then
+        echo "frontend"
+    elif [[ "$PROJECT_TYPE" == "python" ]]; then
+        echo "python"
+    elif [[ "$PROJECT_TYPE" == "c" ]]; then
+        echo "c"
+    elif [[ "$PROJECT_TYPE" == "shell" || "$PROJECT_TYPE" == "generic" ]]; then
+        echo "generic"
+    else
+        echo "generic"
+    fi
+}
+
+setup_package_list() {
+    local kind="$1"
+    case "$kind" in
+        static|frontend)
+            echo "nginx rsync curl"
+            ;;
+        node)
+            echo "nodejs npm rsync curl"
+            ;;
+        python)
+            echo "python3 python3-pip python3-venv rsync curl"
+            ;;
+        c)
+            echo "build-essential make gcc rsync curl"
+            ;;
+        generic)
+            echo "rsync curl"
+            ;;
+    esac
+}
+
+setup_remote_server() {
+    [[ "$SETUP_SERVER" -eq 1 ]] || return "$OK"
+
+    local kind packages server_name proxy_port setup_cmd target_path package_manager remote_user
+    local kind_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
+    kind="$(effective_app_kind)"
+    packages="$(setup_package_list "$kind")"
+    server_name="${DOMAIN_NAME:-_}"
+    proxy_port="$APP_PORT"
+    setup_cmd="$SETUP_CMD"
+    target_path="$TARGET_PATH"
+    package_manager="$PACKAGE_MANAGER"
+    remote_user="$REMOTE_USER"
+
+    printf -v kind_q '%q' "$kind"
+    printf -v packages_q '%q' "$packages"
+    printf -v server_name_q '%q' "$server_name"
+    printf -v proxy_port_q '%q' "$proxy_port"
+    printf -v setup_cmd_q '%q' "$setup_cmd"
+    printf -v target_path_q '%q' "$target_path"
+    printf -v package_manager_q '%q' "$package_manager"
+    printf -v remote_user_q '%q' "$remote_user"
+
+    log_info "[SETUP] Fresh-server setup started -- kind $kind -- packages: $packages"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[DRY-RUN] [SETUP] Would install packages on $REMOTE_HOST: $packages"
+        log_info "[DRY-RUN] [SETUP] Would create target directory: $target_path"
+        if [[ "$kind" == "static" || "$kind" == "frontend" || -n "$proxy_port" ]]; then
+            log_info "[DRY-RUN] [SETUP] Would configure nginx for ${server_name}"
+        fi
+        [[ -z "$setup_cmd" ]] || log_info "[DRY-RUN] [SETUP] Extra setup command: $setup_cmd"
+        return "$OK"
+    fi
+
+    ssh_remote_script "$(cat <<SETUP
+set -euo pipefail
+
+APP_KIND=$kind_q
+PACKAGES=$packages_q
+TARGET_PATH=$target_path_q
+REMOTE_USER_NAME=$remote_user_q
+SERVER_NAME=$server_name_q
+APP_PORT_VALUE=$proxy_port_q
+PACKAGE_MANAGER_CHOICE=$package_manager_q
+EXTRA_SETUP_CMD=$setup_cmd_q
+
+if [ "\$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
+detect_pm() {
+    if [ "\$PACKAGE_MANAGER_CHOICE" != "auto" ]; then
+        echo "\$PACKAGE_MANAGER_CHOICE"
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v apk >/dev/null 2>&1; then
+        echo "apk"
+    else
+        echo "unknown"
+    fi
+}
+
+install_packages() {
+    pm="\$(detect_pm)"
+    case "\$APP_KIND:\$pm" in
+        c:apt) PACKAGES="build-essential make gcc rsync curl" ;;
+        c:dnf|c:yum) PACKAGES="gcc gcc-c++ make rsync curl" ;;
+        c:apk) PACKAGES="build-base rsync curl" ;;
+        python:apk) PACKAGES="python3 py3-pip py3-virtualenv rsync curl" ;;
+    esac
+
+    case "\$pm" in
+        apt)
+            \$SUDO apt-get update -y
+            DEBIAN_FRONTEND=noninteractive \$SUDO apt-get install -y \$PACKAGES
+            ;;
+        dnf)
+            \$SUDO dnf install -y \$PACKAGES
+            ;;
+        yum)
+            \$SUDO yum install -y \$PACKAGES
+            ;;
+        apk)
+            \$SUDO apk add --no-cache \$PACKAGES
+            ;;
+        *)
+            echo "No supported package manager found" >&2
+            exit 113
+            ;;
+    esac
+}
+
+configure_nginx() {
+    if ! command -v nginx >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ -n "\$APP_PORT_VALUE" ]; then
+        NGINX_BODY="server {
+    listen 80;
+    server_name \$SERVER_NAME;
+
+    location / {
+        proxy_pass http://127.0.0.1:\$APP_PORT_VALUE;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \\\$host;
+        proxy_cache_bypass \\\$http_upgrade;
+    }
+}"
+    elif [ "\$APP_KIND" = "static" ] || [ "\$APP_KIND" = "frontend" ]; then
+        NGINX_BODY="server {
+    listen 80;
+    server_name \$SERVER_NAME;
+    root \$TARGET_PATH;
+    index index.html;
+
+    location / {
+        try_files \\\$uri \\\$uri/ /index.html;
+    }
+}"
+    else
+        return 0
+    fi
+
+    if [ -d /etc/nginx/sites-available ]; then
+        CONF_NAME="pipepilot-\$(echo "\$SERVER_NAME" | tr -c 'A-Za-z0-9_.-' '_')"
+        echo "\$NGINX_BODY" | \$SUDO tee "/etc/nginx/sites-available/\$CONF_NAME" >/dev/null
+        \$SUDO ln -sf "/etc/nginx/sites-available/\$CONF_NAME" "/etc/nginx/sites-enabled/\$CONF_NAME"
+        \$SUDO nginx -t
+        \$SUDO systemctl reload nginx || \$SUDO service nginx reload || true
+    elif [ -d /etc/nginx/conf.d ]; then
+        CONF_NAME="pipepilot-\$(echo "\$SERVER_NAME" | tr -c 'A-Za-z0-9_.-' '_').conf"
+        echo "\$NGINX_BODY" | \$SUDO tee "/etc/nginx/conf.d/\$CONF_NAME" >/dev/null
+        \$SUDO nginx -t
+        \$SUDO systemctl reload nginx || \$SUDO service nginx reload || true
+    fi
+}
+
+install_packages
+\$SUDO mkdir -p "\$TARGET_PATH"
+\$SUDO chown -R "\$REMOTE_USER_NAME":"\$REMOTE_USER_NAME" "\$TARGET_PATH" 2>/dev/null || true
+configure_nginx
+
+if [ -n "\$EXTRA_SETUP_CMD" ]; then
+    bash -lc "\$EXTRA_SETUP_CMD"
+fi
+SETUP
+)" || return "$ERR_DEPLOY"
+
+    log_info "[SETUP] Fresh-server setup completed -- kind $kind"
+    return "$OK"
+}
+
 stage_deploy() {
     log_info "[DEPLOY] Starting $ENVIRONMENT deployment"
     DEPLOY_STARTED=1
@@ -110,6 +327,7 @@ stage_deploy() {
     if [[ "$REMOTE_MODE" -eq 1 ]]; then
         validate_remote_config
         log_info "[DEPLOY] Remote mode enabled -- ${REMOTE_USER}@${REMOTE_HOST}:$TARGET_PATH via $TRANSFER_TOOL"
+        setup_remote_server || return "$ERR_DEPLOY"
     fi
 
     run_hook "pre-deploy.sh" || return "$ERR_HOOK"

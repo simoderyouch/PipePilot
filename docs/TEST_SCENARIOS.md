@@ -51,5 +51,6 @@ written to `tests/tmp/archives/`.
 
 - Project type: generic/static frontend
 - Execution mode: sequential
-- Validates: `--remote`, SSH key validation, `--deploy-dir`, `--remote-cmd`,
-  `--restart`, and `--transfer scp` without contacting a real server
+- Validates: `--remote`, `--setup-server`, app-kind provisioning, SSH key
+  validation, `--deploy-dir`, `--remote-cmd`, `--restart`, and `--transfer scp`
+  without contacting a real server

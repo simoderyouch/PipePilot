@@ -60,3 +60,13 @@ PipePilot can deploy to any Linux server that accepts SSH:
   --target /var/www/frontend --deploy-dir dist \
   --build-cmd "npm run build" --url https://myserver.com
 ```
+
+For a fresh server, add `--setup-server` so PipePilot installs the needed
+packages and prepares the target path based on the app type:
+
+```bash
+./pipepilot -p ./frontend -e production --remote --setup-server \
+  --app-kind frontend --host myserver.com --user ubuntu \
+  --key ~/.ssh/server_key.pem --target /var/www/frontend \
+  --deploy-dir dist --domain myserver.com
+```

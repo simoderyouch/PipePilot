@@ -56,6 +56,12 @@ DEPLOY_DIR=""
 REMOTE_CMD=""
 RESTART_SERVICE=""
 TRANSFER_TOOL="rsync"
+SETUP_SERVER=0
+APP_KIND="auto"
+DOMAIN_NAME=""
+APP_PORT=""
+PACKAGE_MANAGER="auto"
+SETUP_CMD=""
 SMOKE_URL=""
 SMOKE_PORT=""
 RETRIES=""
@@ -95,6 +101,12 @@ CLI_DEPLOY_DIR_SET=0
 CLI_REMOTE_CMD_SET=0
 CLI_RESTART_SET=0
 CLI_TRANSFER_SET=0
+CLI_SETUP_SERVER_SET=0
+CLI_APP_KIND_SET=0
+CLI_DOMAIN_SET=0
+CLI_APP_PORT_SET=0
+CLI_PACKAGE_MANAGER_SET=0
+CLI_SETUP_CMD_SET=0
 CLI_URL_SET=0
 CLI_PORT_SET=0
 CLI_RETRIES_SET=0
@@ -175,6 +187,12 @@ DEPLOY OPTIONS
     --remote-cmd "<cmd>"   Command executed on the server after upload
     --restart <service>    Restart a service after deployment
     --transfer <tool>      Transfer tool for remote mode: rsync | scp
+    --setup-server         Prepare a fresh remote Linux server before upload
+    --app-kind <kind>      auto | static | frontend | node | python | c | generic
+    --domain <domain>      Domain/server_name for generated nginx config
+    --app-port <port>      Backend app port used by generated reverse proxy
+    --package-manager <pm> auto | apt | dnf | yum | apk
+    --setup-cmd "<cmd>"    Extra setup command executed before upload
 
 SMOKE TEST OPTIONS
     --url <url>            URL for smoke test
@@ -208,6 +226,7 @@ EXAMPLES
     sudo ./pipepilot -r -p /srv/app
     ./pipepilot -d -p /srv/app -e production
     ./pipepilot -p ./frontend -e production --remote --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /var/www/frontend --deploy-dir dist --url https://myserver.com
+    ./pipepilot -p ./backend -e production --remote --setup-server --app-kind node --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /srv/backend --app-port 3000 --domain api.myserver.com
 HELP
 }
 
@@ -318,6 +337,8 @@ load_configs() {
     KEEP_ARCHIVES="${KEEP_ARCHIVES:-${DEFAULT_KEEP_ARCHIVES:-5}}"
     SSH_PORT="${SSH_PORT:-${DEFAULT_SSH_PORT:-22}}"
     TRANSFER_TOOL="${TRANSFER_TOOL:-${DEFAULT_TRANSFER_TOOL:-rsync}}"
+    APP_KIND="${APP_KIND:-${DEFAULT_APP_KIND:-auto}}"
+    PACKAGE_MANAGER="${PACKAGE_MANAGER:-${DEFAULT_PACKAGE_MANAGER:-auto}}"
 
     local env_file="$SCRIPT_DIR/configs/${ENVIRONMENT}.conf"
     [[ -f "$env_file" ]] || die "$ERR_CONFIG" "[CONFIG] Missing environment config: $env_file"
@@ -331,6 +352,12 @@ load_configs() {
     local cli_remote_cmd="$REMOTE_CMD"
     local cli_restart="$RESTART_SERVICE"
     local cli_transfer="$TRANSFER_TOOL"
+    local cli_setup_server="$SETUP_SERVER"
+    local cli_app_kind="$APP_KIND"
+    local cli_domain="$DOMAIN_NAME"
+    local cli_app_port="$APP_PORT"
+    local cli_package_manager="$PACKAGE_MANAGER"
+    local cli_setup_cmd="$SETUP_CMD"
     local cli_url="$SMOKE_URL"
     local cli_port="$SMOKE_PORT"
 
@@ -347,6 +374,12 @@ load_configs() {
     REMOTE_CMD="${REMOTE_CMD:-}"
     RESTART_SERVICE="${RESTART_SERVICE:-}"
     TRANSFER_TOOL="${TRANSFER_TOOL:-rsync}"
+    SETUP_SERVER="${SETUP_SERVER:-0}"
+    APP_KIND="${APP_KIND:-auto}"
+    DOMAIN_NAME="${DOMAIN_NAME:-}"
+    APP_PORT="${APP_PORT:-}"
+    PACKAGE_MANAGER="${PACKAGE_MANAGER:-auto}"
+    SETUP_CMD="${SETUP_CMD:-}"
     SMOKE_URL="${SMOKE_URL:-}"
     SMOKE_PORT="${SMOKE_PORT:-}"
 
@@ -359,6 +392,12 @@ load_configs() {
     [[ "$CLI_REMOTE_CMD_SET" -eq 0 ]] || REMOTE_CMD="$cli_remote_cmd"
     [[ "$CLI_RESTART_SET" -eq 0 ]] || RESTART_SERVICE="$cli_restart"
     [[ "$CLI_TRANSFER_SET" -eq 0 ]] || TRANSFER_TOOL="$cli_transfer"
+    [[ "$CLI_SETUP_SERVER_SET" -eq 0 ]] || SETUP_SERVER="$cli_setup_server"
+    [[ "$CLI_APP_KIND_SET" -eq 0 ]] || APP_KIND="$cli_app_kind"
+    [[ "$CLI_DOMAIN_SET" -eq 0 ]] || DOMAIN_NAME="$cli_domain"
+    [[ "$CLI_APP_PORT_SET" -eq 0 ]] || APP_PORT="$cli_app_port"
+    [[ "$CLI_PACKAGE_MANAGER_SET" -eq 0 ]] || PACKAGE_MANAGER="$cli_package_manager"
+    [[ "$CLI_SETUP_CMD_SET" -eq 0 ]] || SETUP_CMD="$cli_setup_cmd"
     [[ "$CLI_URL_SET" -eq 0 ]] || SMOKE_URL="$cli_url"
     [[ "$CLI_PORT_SET" -eq 0 ]] || SMOKE_PORT="$cli_port"
 }
@@ -563,6 +602,41 @@ parse_args() {
                 CLI_TRANSFER_SET=1
                 shift 2
                 ;;
+            --setup-server)
+                SETUP_SERVER=1
+                CLI_SETUP_SERVER_SET=1
+                shift
+                ;;
+            --app-kind)
+                need_value "$1" "${2:-}"
+                APP_KIND="$2"
+                CLI_APP_KIND_SET=1
+                shift 2
+                ;;
+            --domain)
+                need_value "$1" "${2:-}"
+                DOMAIN_NAME="$2"
+                CLI_DOMAIN_SET=1
+                shift 2
+                ;;
+            --app-port)
+                need_value "$1" "${2:-}"
+                APP_PORT="$2"
+                CLI_APP_PORT_SET=1
+                shift 2
+                ;;
+            --package-manager)
+                need_value "$1" "${2:-}"
+                PACKAGE_MANAGER="$2"
+                CLI_PACKAGE_MANAGER_SET=1
+                shift 2
+                ;;
+            --setup-cmd)
+                need_value "$1" "${2:-}"
+                SETUP_CMD="$2"
+                CLI_SETUP_CMD_SET=1
+                shift 2
+                ;;
             --url)
                 need_value "$1" "${2:-}"
                 SMOKE_URL="$2"
@@ -638,6 +712,24 @@ validate_options() {
 
     if [[ "$TRANSFER_TOOL" != "rsync" && "$TRANSFER_TOOL" != "scp" ]]; then
         die "$ERR_UNKNOWN_OPTION" "[CONFIG] Invalid transfer tool: $TRANSFER_TOOL"
+    fi
+
+    case "$APP_KIND" in
+        auto|static|frontend|node|python|c|generic) ;;
+        *) die "$ERR_CONFIG" "[CONFIG] Invalid app kind: $APP_KIND" ;;
+    esac
+
+    case "$PACKAGE_MANAGER" in
+        auto|apt|dnf|yum|apk) ;;
+        *) die "$ERR_CONFIG" "[CONFIG] Invalid package manager: $PACKAGE_MANAGER" ;;
+    esac
+
+    if [[ -n "$APP_PORT" && ! "$APP_PORT" =~ ^[0-9]+$ ]]; then
+        die "$ERR_CONFIG" "[CONFIG] --app-port must be a number"
+    fi
+
+    if [[ "$SETUP_SERVER" -eq 1 && "$REMOTE_MODE" -ne 1 ]]; then
+        die "$ERR_CONFIG" "[CONFIG] --setup-server requires --remote"
     fi
 
     if [[ "$ENVIRONMENT" == "production" && "$REMOTE_MODE" -eq 0 && "$DRY_RUN" -ne 1 && "${EUID:-$(id -u)}" -ne 0 ]]; then

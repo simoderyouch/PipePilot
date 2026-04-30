@@ -2,7 +2,8 @@
 # Extra scenario - Remote deployment dry run.
 # This test proves that the new SSH deployment options are parsed and validated
 # without needing a real VPS, school server, or cloud VM. A temporary fake key is
-# enough because --dry-run prevents actual ssh/scp/rsync execution.
+# enough because --dry-run prevents actual ssh/scp/rsync execution. It also
+# exercises smart fresh-server setup with --setup-server.
 
 set -euo pipefail
 
@@ -41,12 +42,17 @@ chmod 600 "$KEY_PATH"
     -p "$WORK_DIR" \
     -e production \
     --remote \
+    --setup-server \
+    --app-kind frontend \
     --host example.com \
     --user deploy \
     --key "$KEY_PATH" \
     --ssh-port 2222 \
     --target /var/www/pipepilot-remote \
     --deploy-dir dist \
+    --domain example.com \
+    --package-manager apt \
+    --setup-cmd "echo custom setup ok" \
     --transfer scp \
     --remote-cmd "echo remote command ok" \
     --restart pipepilot-demo \
