@@ -1,0 +1,6 @@
+# PipePilot uses semantic versioning: MAJOR.MINOR.PATCH.
+# MAJOR changes break command-line behavior.
+# MINOR changes add compatible features/options.
+# PATCH changes fix bugs or improve internals without changing usage.
+0.1.0
+
