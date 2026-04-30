@@ -1118,13 +1118,17 @@ run_thread_pipeline() {
 
 run_pipeline() {
     log_info "[START] Pipeline started -- $PROJECT_PATH"
+    local status=0
     case "$MODE" in
-        sequential) run_sequential_pipeline ;;
-        subshell) run_subshell_pipeline ;;
-        fork) run_fork_pipeline ;;
-        thread) run_thread_pipeline ;;
+        sequential) run_sequential_pipeline || status=$? ;;
+        subshell) run_subshell_pipeline || status=$? ;;
+        fork) run_fork_pipeline || status=$? ;;
+        thread) run_thread_pipeline || status=$? ;;
         *) die "$ERR_CONFIG" "[MODE] Invalid execution mode: $MODE" ;;
     esac
+    if [[ "$status" -ne 0 ]]; then
+        exit "$status"
+    fi
     log_info "[END] Pipeline completed successfully"
 }
 

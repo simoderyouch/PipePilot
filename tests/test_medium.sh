@@ -41,8 +41,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import add, multiply
 
 
-assert add(2, 3) == 5
-assert multiply(4, 5) == 20
+def test_math_helpers():
+    """Validate both functions so pytest and plain Python execution pass."""
+    assert add(2, 3) == 5
+    assert multiply(4, 5) == 20
+
+
+if __name__ == "__main__":
+    test_math_helpers()
 PY
 
 "$ROOT_DIR/pipepilot" \
@@ -54,4 +60,3 @@ PY
     -l "$LOG_DIR"
 
 echo "[SCENARIO] Medium Python project completed"
-
