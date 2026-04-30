@@ -4,6 +4,17 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.6.0] - 2026-04-30
+
+### Added
+
+- Automatic backend runtime configuration after remote upload.
+- Backend start command detection for Python FastAPI/Flask/simple scripts and
+  Node.js package/start files.
+- Automatic production dependency installation and systemd service creation for
+  remote backend deployments.
+- `--start-cmd` and `--service-name` overrides.
+
 ## [0.5.0] - 2026-04-30
 
 ### Changed

@@ -134,6 +134,84 @@ effective_backend_runtime() {
     fi
 }
 
+effective_app_port() {
+    local runtime
+    runtime="$(effective_backend_runtime)"
+    if [[ -n "$APP_PORT" ]]; then
+        echo "$APP_PORT"
+    elif [[ "$runtime" == "python" ]]; then
+        echo "8000"
+    else
+        echo "3000"
+    fi
+}
+
+detect_node_start_command() {
+    if [[ -n "$START_CMD" ]]; then
+        echo "$START_CMD"
+    elif [[ -f "$PROJECT_PATH/package.json" ]] && grep -q '"start"[[:space:]]*:' "$PROJECT_PATH/package.json"; then
+        echo "npm start"
+    elif [[ -f "$PROJECT_PATH/server.js" ]]; then
+        echo "node server.js"
+    elif [[ -f "$PROJECT_PATH/app.js" ]]; then
+        echo "node app.js"
+    elif [[ -f "$PROJECT_PATH/index.js" ]]; then
+        echo "node index.js"
+    elif [[ -f "$PROJECT_PATH/main.js" ]]; then
+        echo "node main.js"
+    else
+        echo "npm start"
+    fi
+}
+
+detect_python_start_command() {
+    local port module file
+    port="$(effective_app_port)"
+
+    if [[ -n "$START_CMD" ]]; then
+        echo "$START_CMD"
+        return 0
+    fi
+
+    for file in "$PROJECT_PATH/main.py" "$PROJECT_PATH/app.py"; do
+        [[ -f "$file" ]] || continue
+        module="$(basename "$file" .py)"
+        if grep -q "FastAPI(" "$file"; then
+            echo ".venv/bin/python -m uvicorn ${module}:app --host 0.0.0.0 --port $port"
+            return 0
+        fi
+        if grep -q "Flask(" "$file"; then
+            echo ".venv/bin/python -m flask --app ${module} run --host 0.0.0.0 --port $port"
+            return 0
+        fi
+    done
+
+    if [[ -f "$PROJECT_PATH/app.py" ]]; then
+        echo ".venv/bin/python app.py"
+    elif [[ -f "$PROJECT_PATH/main.py" ]]; then
+        echo ".venv/bin/python main.py"
+    else
+        echo ".venv/bin/python app.py"
+    fi
+}
+
+detect_backend_start_command() {
+    case "$(effective_backend_runtime)" in
+        python) detect_python_start_command ;;
+        node) detect_node_start_command ;;
+    esac
+}
+
+effective_service_name() {
+    local raw_name
+    if [[ -n "$SERVICE_NAME" ]]; then
+        raw_name="$SERVICE_NAME"
+    else
+        raw_name="pipepilot-$(basename "$PROJECT_PATH")"
+    fi
+    printf '%s' "$raw_name" | tr -c 'A-Za-z0-9_.-' '-'
+}
+
 setup_package_list() {
     local kind="$1"
     local runtime="$2"
@@ -157,10 +235,18 @@ setup_remote_server() {
     local kind runtime packages server_name proxy_port setup_cmd target_path package_manager remote_user
     local kind_q runtime_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
     kind="$(effective_app_kind)"
-    runtime="$(effective_backend_runtime)"
+    if [[ "$kind" == "backend" ]]; then
+        runtime="$(effective_backend_runtime)"
+    else
+        runtime="none"
+    fi
     packages="$(setup_package_list "$kind" "$runtime")"
     server_name="${DOMAIN_NAME:-_}"
-    proxy_port="$APP_PORT"
+    if [[ "$kind" == "backend" ]]; then
+        proxy_port="$(effective_app_port)"
+    else
+        proxy_port="$APP_PORT"
+    fi
     setup_cmd="$SETUP_CMD"
     target_path="$TARGET_PATH"
     package_manager="$PACKAGE_MANAGER"
@@ -313,6 +399,100 @@ SETUP
     return "$OK"
 }
 
+configure_backend_runtime() {
+    local kind runtime port start_cmd service_name target_path remote_user
+    local runtime_q port_q start_cmd_q service_name_q target_path_q remote_user_q
+    kind="$(effective_app_kind)"
+    [[ "$REMOTE_MODE" -eq 1 && "$kind" == "backend" ]] || return "$OK"
+
+    runtime="$(effective_backend_runtime)"
+    port="$(effective_app_port)"
+    start_cmd="$(detect_backend_start_command)"
+    service_name="$(effective_service_name)"
+    target_path="$TARGET_PATH"
+    remote_user="$REMOTE_USER"
+
+    printf -v runtime_q '%q' "$runtime"
+    printf -v port_q '%q' "$port"
+    printf -v start_cmd_q '%q' "$start_cmd"
+    printf -v service_name_q '%q' "$service_name"
+    printf -v target_path_q '%q' "$target_path"
+    printf -v remote_user_q '%q' "$remote_user"
+
+    log_info "[BACKEND] Runtime detected -- $runtime -- command: $start_cmd -- service: $service_name"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[DRY-RUN] [BACKEND] Would install production dependencies in $target_path"
+        log_info "[DRY-RUN] [BACKEND] Would create/restart systemd service $service_name on port $port"
+        return "$OK"
+    fi
+
+    ssh_remote_script "$(cat <<BACKEND
+set -euo pipefail
+
+BACKEND_RUNTIME_VALUE=$runtime_q
+APP_PORT_VALUE=$port_q
+START_COMMAND=$start_cmd_q
+SERVICE_NAME_VALUE=$service_name_q
+TARGET_PATH=$target_path_q
+REMOTE_USER_NAME=$remote_user_q
+
+if [ "\$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
+cd "\$TARGET_PATH"
+
+if [ "\$BACKEND_RUNTIME_VALUE" = "node" ]; then
+    if [ -f package-lock.json ]; then
+        npm ci --omit=dev
+    elif [ -f package.json ]; then
+        npm install --omit=dev
+    fi
+else
+    python3 -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    if [ -f requirements.txt ]; then
+        .venv/bin/pip install -r requirements.txt
+    fi
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    SERVICE_FILE="/etc/systemd/system/\$SERVICE_NAME_VALUE.service"
+    \$SUDO tee "\$SERVICE_FILE" >/dev/null <<SERVICE
+[Unit]
+Description=PipePilot backend service \$SERVICE_NAME_VALUE
+After=network.target
+
+[Service]
+Type=simple
+User=\$REMOTE_USER_NAME
+WorkingDirectory=\$TARGET_PATH
+Environment=PORT=\$APP_PORT_VALUE
+Environment=NODE_ENV=production
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc '\$START_COMMAND'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+    \$SUDO systemctl daemon-reload
+    \$SUDO systemctl enable "\$SERVICE_NAME_VALUE"
+    \$SUDO systemctl restart "\$SERVICE_NAME_VALUE"
+else
+    nohup bash -lc "cd '\$TARGET_PATH' && PORT='\$APP_PORT_VALUE' \$START_COMMAND" > "\$TARGET_PATH/pipepilot-backend.log" 2>&1 &
+fi
+BACKEND
+)" || return "$ERR_DEPLOY"
+
+    log_info "[BACKEND] Backend service configured and restarted -- $service_name"
+    return "$OK"
+}
+
 stage_deploy() {
     log_info "[DEPLOY] Starting $ENVIRONMENT deployment"
     DEPLOY_STARTED=1
@@ -336,8 +516,12 @@ stage_deploy() {
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log_info "[DEPLOY] Dry-run deployment from $source_dir to $TARGET_PATH"
+        if [[ "$REMOTE_MODE" -eq 1 ]]; then
+            configure_backend_runtime || return "$ERR_DEPLOY"
+        fi
     elif [[ "$REMOTE_MODE" -eq 1 ]]; then
         copy_remote "$source_dir" || return "$ERR_DEPLOY"
+        configure_backend_runtime || return "$ERR_DEPLOY"
     else
         copy_local "$source_dir" || return "$ERR_DEPLOY"
     fi

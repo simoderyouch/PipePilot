@@ -70,3 +70,13 @@ packages and prepares the target path based on the app type:
   --key ~/.ssh/server_key.pem --target /var/www/frontend \
   --deploy-dir dist --domain myserver.com
 ```
+
+For backends, PipePilot can install dependencies and create a systemd service
+automatically:
+
+```bash
+./pipepilot -p ./backend -e production --remote --setup-server \
+  --app-kind backend --backend-runtime python --host api.myserver.com \
+  --user ubuntu --key ~/.ssh/server_key.pem --target /srv/backend \
+  --app-port 8000 --domain api.myserver.com
+```

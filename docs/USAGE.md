@@ -151,6 +151,8 @@ Useful setup options:
 --backend-runtime <rt>  auto | python | node
 --domain <domain>       nginx server_name for frontend/proxy configs
 --app-port <port>       backend port for nginx reverse proxy
+--start-cmd "<cmd>"     backend start command; auto-detected when omitted
+--service-name <name>   systemd service name; generated when omitted
 --package-manager <pm>  auto | apt | dnf | yum | apk
 --setup-cmd "<cmd>"     extra remote setup command before upload
 ```
@@ -160,6 +162,57 @@ arguments to infer the setup. A project that uploads `dist/`, `build/`, or
 `public/` is treated like a frontend. A project with `--app-port` or a Python
 project is treated like a backend. Backend runtime can be selected explicitly
 with `--backend-runtime python` or `--backend-runtime node`.
+
+## Smart Backend Runtime
+
+For remote backend deployments, PipePilot now does more than upload files. After
+transfer it installs production dependencies and starts the backend as a
+service:
+
+- Python: creates `.venv`, installs `requirements.txt`, detects FastAPI, Flask,
+  `app.py`, or `main.py`.
+- Node.js: installs production dependencies and detects `npm start`,
+  `server.js`, `app.js`, `index.js`, or `main.js`.
+- systemd: creates and restarts a service automatically.
+- Override: use `--start-cmd` or `--service-name` when your app needs a custom
+  command or service name.
+
+Python backend with automatic FastAPI detection:
+
+```bash
+./pipepilot \
+  -p ./backend \
+  -e production \
+  --remote \
+  --setup-server \
+  --app-kind backend \
+  --backend-runtime python \
+  --host api.myserver.com \
+  --user ubuntu \
+  --key ~/.ssh/server_key.pem \
+  --target /srv/backend \
+  --app-port 8000 \
+  --domain api.myserver.com
+```
+
+Node backend with a custom start command:
+
+```bash
+./pipepilot \
+  -p ./api \
+  -e production \
+  --remote \
+  --setup-server \
+  --app-kind backend \
+  --backend-runtime node \
+  --host api.myserver.com \
+  --user ubuntu \
+  --key ~/.ssh/server_key.pem \
+  --target /srv/api \
+  --app-port 3000 \
+  --start-cmd "node server.js" \
+  --service-name pipepilot-api
+```
 
 ## Logs
 

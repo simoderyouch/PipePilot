@@ -61,6 +61,8 @@ APP_KIND="auto"
 BACKEND_RUNTIME="auto"
 DOMAIN_NAME=""
 APP_PORT=""
+START_CMD=""
+SERVICE_NAME=""
 PACKAGE_MANAGER="auto"
 SETUP_CMD=""
 SMOKE_URL=""
@@ -107,6 +109,8 @@ CLI_APP_KIND_SET=0
 CLI_BACKEND_RUNTIME_SET=0
 CLI_DOMAIN_SET=0
 CLI_APP_PORT_SET=0
+CLI_START_CMD_SET=0
+CLI_SERVICE_NAME_SET=0
 CLI_PACKAGE_MANAGER_SET=0
 CLI_SETUP_CMD_SET=0
 CLI_URL_SET=0
@@ -194,6 +198,8 @@ DEPLOY OPTIONS
     --backend-runtime <rt> auto | python | node
     --domain <domain>      Domain/server_name for generated nginx config
     --app-port <port>      Backend app port used by generated reverse proxy
+    --start-cmd "<cmd>"    Backend start command, auto-detected when omitted
+    --service-name <name>  systemd service name for backend auto-start
     --package-manager <pm> auto | apt | dnf | yum | apk
     --setup-cmd "<cmd>"    Extra setup command executed before upload
 
@@ -361,6 +367,8 @@ load_configs() {
     local cli_backend_runtime="$BACKEND_RUNTIME"
     local cli_domain="$DOMAIN_NAME"
     local cli_app_port="$APP_PORT"
+    local cli_start_cmd="$START_CMD"
+    local cli_service_name="$SERVICE_NAME"
     local cli_package_manager="$PACKAGE_MANAGER"
     local cli_setup_cmd="$SETUP_CMD"
     local cli_url="$SMOKE_URL"
@@ -384,6 +392,8 @@ load_configs() {
     BACKEND_RUNTIME="${BACKEND_RUNTIME:-auto}"
     DOMAIN_NAME="${DOMAIN_NAME:-}"
     APP_PORT="${APP_PORT:-}"
+    START_CMD="${START_CMD:-}"
+    SERVICE_NAME="${SERVICE_NAME:-}"
     PACKAGE_MANAGER="${PACKAGE_MANAGER:-auto}"
     SETUP_CMD="${SETUP_CMD:-}"
     SMOKE_URL="${SMOKE_URL:-}"
@@ -403,6 +413,8 @@ load_configs() {
     [[ "$CLI_BACKEND_RUNTIME_SET" -eq 0 ]] || BACKEND_RUNTIME="$cli_backend_runtime"
     [[ "$CLI_DOMAIN_SET" -eq 0 ]] || DOMAIN_NAME="$cli_domain"
     [[ "$CLI_APP_PORT_SET" -eq 0 ]] || APP_PORT="$cli_app_port"
+    [[ "$CLI_START_CMD_SET" -eq 0 ]] || START_CMD="$cli_start_cmd"
+    [[ "$CLI_SERVICE_NAME_SET" -eq 0 ]] || SERVICE_NAME="$cli_service_name"
     [[ "$CLI_PACKAGE_MANAGER_SET" -eq 0 ]] || PACKAGE_MANAGER="$cli_package_manager"
     [[ "$CLI_SETUP_CMD_SET" -eq 0 ]] || SETUP_CMD="$cli_setup_cmd"
     [[ "$CLI_URL_SET" -eq 0 ]] || SMOKE_URL="$cli_url"
@@ -636,6 +648,18 @@ parse_args() {
                 need_value "$1" "${2:-}"
                 APP_PORT="$2"
                 CLI_APP_PORT_SET=1
+                shift 2
+                ;;
+            --start-cmd)
+                need_value "$1" "${2:-}"
+                START_CMD="$2"
+                CLI_START_CMD_SET=1
+                shift 2
+                ;;
+            --service-name)
+                need_value "$1" "${2:-}"
+                SERVICE_NAME="$2"
+                CLI_SERVICE_NAME_SET=1
                 shift 2
                 ;;
             --package-manager)

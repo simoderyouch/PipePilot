@@ -2,4 +2,4 @@
 # MAJOR changes break command-line behavior.
 # MINOR changes add compatible features/options.
 # PATCH changes fix bugs or improve internals without changing usage.
-0.5.0
+0.6.0

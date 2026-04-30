@@ -44,7 +44,7 @@ stage_build() {
         case "$PROJECT_TYPE" in
             node)
                 require_command npm "$ERR_DEPENDENCY"
-                run_shell_in_project "npm install && npm run build" || return "$ERR_BUILD"
+                run_shell_in_project "npm install && npm run build --if-present" || return "$ERR_BUILD"
                 ;;
             python)
                 if [[ -f "$PROJECT_PATH/requirements.txt" ]]; then
