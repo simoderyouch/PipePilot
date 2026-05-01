@@ -7,6 +7,13 @@ archives/*.tar.gz
 archives/*.tar.xz
 archives/*.zip
 
+# Private keys and local secrets must never be committed.
+*.pem
+*.key
+*.ppk
+.env
+.env.*
+
 # Temporary demo projects created by test scenarios.
 tests/tmp/
 
@@ -14,4 +21,3 @@ tests/tmp/
 .DS_Store
 *.swp
 *.swo
-
