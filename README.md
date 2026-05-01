@@ -1,6 +1,6 @@
 # PipePilot
 
-![PipePilot banner](https://raw.githubusercontent.com/simoderyouch/PipePilot/main/assets/pipepilot_banner.png)
+![PipePilot banner](assets/pipepilot_banner.webp)
 
 **Automate. Validate. Deploy. Rollback safely.**
 
