@@ -8,6 +8,7 @@
 stage_test() {
     if [[ "$SKIP_TESTS" -eq 1 ]]; then
         log_info "[TEST] Skipped by --skip-tests"
+        status_line "[TEST] skipped by --skip-tests"
         return "$OK"
     fi
 
@@ -49,13 +50,20 @@ stage_test() {
             ;;
         node)
             if command -v npm >/dev/null 2>&1; then
-                run_shell_in_project "npm test" || return "$ERR_TEST"
-                passed=1
+                if package_json_has_script "test"; then
+                    status_line "[TEST] running npm test"
+                    run_shell_in_project "npm test" || return "$ERR_TEST"
+                    passed=1
+                else
+                    log_info "[TEST] package.json has no test script; skipping"
+                    status_line "[TEST] no npm test script found"
+                fi
             fi
             ;;
     esac
 
     [[ "$failed" -eq 0 ]] || return "$ERR_TEST"
     log_info "[TEST] $passed tests passed successfully"
+    status_line "[TEST] passed=$passed failed=$failed"
     return "$OK"
 }

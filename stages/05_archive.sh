@@ -27,6 +27,7 @@ cleanup_old_archives() {
 stage_archive() {
     if [[ "$NO_ARCHIVE" -eq 1 ]]; then
         log_info "[ARCHIVE] Skipped by --no-archive"
+        status_line "[ARCHIVE] skipped by --no-archive"
         return "$OK"
     fi
 
@@ -53,6 +54,6 @@ stage_archive() {
 
     cleanup_old_archives
     log_info "[ARCHIVE] $archive_name created"
+    status_line "[ARCHIVE] created $LATEST_ARCHIVE"
     return "$OK"
 }
-

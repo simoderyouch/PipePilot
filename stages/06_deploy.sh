@@ -17,7 +17,7 @@ run_hook() {
 
 deployment_source() {
     # --deploy-dir lets users upload a specific build output such as dist/,
-    # build/, public/, or any custom folder created by the build step.
+    # build/, out/, public/, or any custom folder created by the build step.
     if [[ -n "$DEPLOY_DIR" ]]; then
         if [[ "$DEPLOY_DIR" = /* ]]; then
             echo "$DEPLOY_DIR"
@@ -27,24 +27,41 @@ deployment_source() {
         return 0
     fi
 
-    if [[ -d "$PROJECT_PATH/build" ]]; then
-        echo "$PROJECT_PATH/build"
-    elif [[ -d "$PROJECT_PATH/dist" ]]; then
-        echo "$PROJECT_PATH/dist"
-    elif [[ -d "$PROJECT_PATH/public" ]]; then
-        echo "$PROJECT_PATH/public"
-    else
-        echo "$PROJECT_PATH"
-    fi
+    local candidate
+    for candidate in dist build out public; do
+        if [[ -d "$PROJECT_PATH/$candidate" && -f "$PROJECT_PATH/$candidate/index.html" ]]; then
+            echo "$PROJECT_PATH/$candidate"
+            return 0
+        fi
+    done
+
+    for candidate in dist build out public; do
+        if [[ -d "$PROJECT_PATH/$candidate" ]]; then
+            echo "$PROJECT_PATH/$candidate"
+            return 0
+        fi
+    done
+
+    echo "$PROJECT_PATH"
 }
 
 copy_local() {
     local source_dir="$1"
     mkdir -p "$TARGET_PATH"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a --delete "$source_dir"/ "$TARGET_PATH"/
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            rsync -a --delete "$source_dir"/ "$TARGET_PATH"/
+        else
+            raw_log_command rsync -a --delete "$source_dir"/ "$TARGET_PATH"/
+            rsync -a --delete "$source_dir"/ "$TARGET_PATH"/ >> "$RAW_LOG_FILE" 2>&1
+        fi
     else
-        cp -a "$source_dir"/. "$TARGET_PATH"/
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            cp -a "$source_dir"/. "$TARGET_PATH"/
+        else
+            raw_log_command cp -a "$source_dir"/. "$TARGET_PATH"/
+            cp -a "$source_dir"/. "$TARGET_PATH"/ >> "$RAW_LOG_FILE" 2>&1
+        fi
     fi
 }
 
@@ -56,10 +73,20 @@ copy_remote() {
 
     if [[ "$TRANSFER_TOOL" == "rsync" ]]; then
         require_command rsync "$ERR_DEPENDENCY"
-        rsync -avz --delete -e "ssh -i $REMOTE_KEY -p $SSH_PORT" "$source_dir"/ "$remote:$TARGET_PATH"/
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            rsync -avz --delete -e "ssh -i $REMOTE_KEY -p $SSH_PORT" "$source_dir"/ "$remote:$TARGET_PATH"/
+        else
+            raw_log_command rsync -avz --delete -e "ssh -i $REMOTE_KEY -p $SSH_PORT" "$source_dir"/ "$remote:$TARGET_PATH"/
+            rsync -avz --delete -e "ssh -i $REMOTE_KEY -p $SSH_PORT" "$source_dir"/ "$remote:$TARGET_PATH"/ >> "$RAW_LOG_FILE" 2>&1
+        fi
     else
         require_command scp "$ERR_DEPENDENCY"
-        scp -i "$REMOTE_KEY" -P "$SSH_PORT" -r "$source_dir"/. "$remote:$TARGET_PATH"/
+        if [[ "$VERBOSE" -eq 1 ]]; then
+            scp -i "$REMOTE_KEY" -P "$SSH_PORT" -r "$source_dir"/. "$remote:$TARGET_PATH"/
+        else
+            raw_log_command scp -i "$REMOTE_KEY" -P "$SSH_PORT" -r "$source_dir"/. "$remote:$TARGET_PATH"/
+            scp -i "$REMOTE_KEY" -P "$SSH_PORT" -r "$source_dir"/. "$remote:$TARGET_PATH"/ >> "$RAW_LOG_FILE" 2>&1
+        fi
     fi
 }
 
@@ -68,16 +95,28 @@ ssh_remote() {
     # string so users can provide normal shell commands through --remote-cmd.
     local command_text="$1"
     require_command ssh "$ERR_DEPENDENCY"
-    ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "$command_text"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "$command_text"
+    else
+        raw_log_command ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "$command_text"
+        ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "$command_text" >> "$RAW_LOG_FILE" 2>&1
+    fi
 }
 
 ssh_remote_script() {
-    # Send a multi-line Bash script through SSH. This is used for fresh-server
-    # setup because package-manager detection and conditional nginx setup are
-    # easier to read as a script than as one long command line.
+    # Send a multi-line Bash script through SSH.
     local script_text="$1"
     require_command ssh "$ERR_DEPENDENCY"
-    ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<< "$script_text"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<< "$script_text"
+    else
+        raw_log_command ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s"
+        ssh -i "$REMOTE_KEY" -p "$SSH_PORT" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<< "$script_text" >> "$RAW_LOG_FILE" 2>&1
+    fi
+}
+
+remote_setup_helper() {
+    echo "$SCRIPT_DIR/helpers/remote_setup.sh"
 }
 
 validate_remote_config() {
@@ -86,7 +125,6 @@ validate_remote_config() {
     [[ -n "$REMOTE_HOST" ]] || die "$ERR_MISSING_PARAMETER" "[REMOTE] Missing --host"
     [[ -n "$REMOTE_USER" ]] || die "$ERR_MISSING_PARAMETER" "[REMOTE] Missing --user"
     [[ -n "$REMOTE_KEY" ]] || die "$ERR_MISSING_PARAMETER" "[REMOTE] Missing --key"
-    [[ "$CLI_TARGET_SET" -eq 1 ]] || die "$ERR_MISSING_PARAMETER" "[REMOTE] Missing --target"
     [[ -n "$TARGET_PATH" ]] || die "$ERR_MISSING_PARAMETER" "[REMOTE] Missing --target"
 
     [[ -f "$REMOTE_KEY" ]] || die "$ERR_PROJECT_NOT_FOUND" "[REMOTE] SSH key not found: $REMOTE_KEY"
@@ -99,6 +137,91 @@ validate_remote_config() {
         local source_dir
         source_dir="$(deployment_source)"
         [[ -d "$source_dir" ]] || die "$ERR_DEPLOY" "[REMOTE] Deploy directory not found: $source_dir"
+    fi
+}
+
+is_ip_host() {
+    local host="$1"
+    [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "$host" =~ ^[0-9A-Fa-f:]+$ ]]
+}
+
+safe_path_name() {
+    local raw="$1"
+    local safe
+    safe="$(printf '%s' "$raw" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^-*//; s/-*$//')"
+    echo "${safe:-pipepilot-app}"
+}
+
+effective_server_name() {
+    if [[ -n "$DOMAIN_NAME" ]]; then
+        echo "$DOMAIN_NAME"
+    elif [[ -n "$REMOTE_HOST" ]]; then
+        echo "$REMOTE_HOST"
+    else
+        echo "_"
+    fi
+}
+
+smart_remote_target() {
+    local kind="$1"
+    local name
+
+    if [[ "$kind" == "backend" ]]; then
+        name="$(safe_path_name "$(basename "$PROJECT_PATH")")"
+        echo "/srv/$name"
+        return 0
+    fi
+
+    if [[ -n "$DOMAIN_NAME" ]]; then
+        name="$(safe_path_name "$DOMAIN_NAME")"
+    elif [[ -n "$REMOTE_HOST" ]] && ! is_ip_host "$REMOTE_HOST"; then
+        name="$(safe_path_name "$REMOTE_HOST")"
+    else
+        name="$(safe_path_name "$(basename "$PROJECT_PATH")")"
+    fi
+
+    echo "/var/www/$name"
+}
+
+relative_deploy_source() {
+    local source_dir="$1"
+    if [[ "$source_dir" == "$PROJECT_PATH" ]]; then
+        echo "."
+    elif [[ "$source_dir" == "$PROJECT_PATH/"* ]]; then
+        echo "${source_dir#"$PROJECT_PATH/"}"
+    else
+        echo "$source_dir"
+    fi
+}
+
+apply_smart_remote_defaults() {
+    [[ "$REMOTE_MODE" -eq 1 ]] || return "$OK"
+
+    local kind source_dir
+    kind="$(effective_app_kind)"
+
+    if [[ "$CLI_DOMAIN_SET" -eq 0 && -z "$DOMAIN_NAME" && -n "$REMOTE_HOST" ]] && ! is_ip_host "$REMOTE_HOST"; then
+        DOMAIN_NAME="$REMOTE_HOST"
+        log_info "[SMART] Domain inferred from remote host: $DOMAIN_NAME"
+        status_line "[SMART] Domain: $DOMAIN_NAME"
+    fi
+
+    if [[ "$CLI_TARGET_SET" -eq 0 ]]; then
+        TARGET_PATH="$(smart_remote_target "$kind")"
+        log_info "[SMART] Remote target inferred: $TARGET_PATH"
+        status_line "[SMART] target=$TARGET_PATH"
+    fi
+
+    if [[ "$CLI_DEPLOY_DIR_SET" -eq 0 ]]; then
+        source_dir="$(deployment_source)"
+        log_info "[SMART] Deploy source inferred: $(relative_deploy_source "$source_dir")"
+        status_line "[SMART] deploy_source=$(relative_deploy_source "$source_dir")"
+    fi
+
+    if [[ "$CLI_SETUP_SERVER_SET" -eq 0 && "$SETUP_SERVER" -eq 0 ]]; then
+        SETUP_SERVER=1
+        log_info "[SMART] Remote server setup enabled automatically"
+        status_line "[SMART] setup=enabled"
     fi
 }
 
@@ -232,7 +355,7 @@ setup_package_list() {
 setup_remote_server() {
     [[ "$SETUP_SERVER" -eq 1 ]] || return "$OK"
 
-    local kind runtime packages server_name proxy_port setup_cmd target_path package_manager remote_user
+    local kind runtime packages server_name proxy_port setup_cmd target_path package_manager remote_user helper_path setup_env
     local kind_q runtime_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
     kind="$(effective_app_kind)"
     if [[ "$kind" == "backend" ]]; then
@@ -241,7 +364,7 @@ setup_remote_server() {
         runtime="none"
     fi
     packages="$(setup_package_list "$kind" "$runtime")"
-    server_name="${DOMAIN_NAME:-_}"
+    server_name="$(effective_server_name)"
     if [[ "$kind" == "backend" ]]; then
         proxy_port="$(effective_app_port)"
     else
@@ -261,22 +384,10 @@ setup_remote_server() {
     printf -v target_path_q '%q' "$target_path"
     printf -v package_manager_q '%q' "$package_manager"
     printf -v remote_user_q '%q' "$remote_user"
+    helper_path="$(remote_setup_helper)"
+    [[ -f "$helper_path" ]] || die "$ERR_PROJECT_NOT_FOUND" "[SETUP] Remote setup helper not found: $helper_path"
 
-    log_info "[SETUP] Fresh-server setup started -- kind $kind -- runtime $runtime -- packages: $packages"
-
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-        log_info "[DRY-RUN] [SETUP] Would install packages on $REMOTE_HOST: $packages"
-        log_info "[DRY-RUN] [SETUP] Would create target directory: $target_path"
-        if [[ "$kind" == "frontend" || -n "$proxy_port" ]]; then
-            log_info "[DRY-RUN] [SETUP] Would configure nginx for ${server_name}"
-        fi
-        [[ -z "$setup_cmd" ]] || log_info "[DRY-RUN] [SETUP] Extra setup command: $setup_cmd"
-        return "$OK"
-    fi
-
-    ssh_remote_script "$(cat <<SETUP
-set -euo pipefail
-
+    setup_env="$(cat <<SETUP_ENV
 APP_KIND=$kind_q
 BACKEND_RUNTIME_VALUE=$runtime_q
 PACKAGES=$packages_q
@@ -286,116 +397,28 @@ SERVER_NAME=$server_name_q
 APP_PORT_VALUE=$proxy_port_q
 PACKAGE_MANAGER_CHOICE=$package_manager_q
 EXTRA_SETUP_CMD=$setup_cmd_q
+SETUP_ENV
+)"
 
-if [ "\$(id -u)" -eq 0 ]; then
-    SUDO=""
-else
-    SUDO="sudo"
-fi
+    log_info "[SETUP] Fresh-server setup started -- kind $kind -- runtime $runtime -- packages: $packages"
+    status_line "[SETUP] app_kind=$kind runtime=$runtime packages=\"$packages\""
+    status_line "[SETUP] target=$target_path server_name=$server_name"
 
-detect_pm() {
-    if [ "\$PACKAGE_MANAGER_CHOICE" != "auto" ]; then
-        echo "\$PACKAGE_MANAGER_CHOICE"
-    elif command -v apt-get >/dev/null 2>&1; then
-        echo "apt"
-    elif command -v dnf >/dev/null 2>&1; then
-        echo "dnf"
-    elif command -v yum >/dev/null 2>&1; then
-        echo "yum"
-    elif command -v apk >/dev/null 2>&1; then
-        echo "apk"
-    else
-        echo "unknown"
-    fi
-}
-
-install_packages() {
-    pm="\$(detect_pm)"
-    case "\$APP_KIND:\$BACKEND_RUNTIME_VALUE:\$pm" in
-        backend:python:apk) PACKAGES="python3 py3-pip py3-virtualenv nginx rsync curl" ;;
-    esac
-
-    case "\$pm" in
-        apt)
-            \$SUDO apt-get update -y
-            DEBIAN_FRONTEND=noninteractive \$SUDO apt-get install -y \$PACKAGES
-            ;;
-        dnf)
-            \$SUDO dnf install -y \$PACKAGES
-            ;;
-        yum)
-            \$SUDO yum install -y \$PACKAGES
-            ;;
-        apk)
-            \$SUDO apk add --no-cache \$PACKAGES
-            ;;
-        *)
-            echo "No supported package manager found" >&2
-            exit 113
-            ;;
-    esac
-}
-
-configure_nginx() {
-    if ! command -v nginx >/dev/null 2>&1; then
-        return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log_info "[DRY-RUN] [SETUP] Would install packages on $REMOTE_HOST: $packages"
+        log_info "[DRY-RUN] [SETUP] Would create target directory: $target_path"
+        if [[ "$kind" == "frontend" || -n "$proxy_port" ]]; then
+            log_info "[DRY-RUN] [SETUP] Would configure nginx for ${server_name}"
+        fi
+        status_line "[SETUP] dry-run: would install packages, create target, and configure nginx"
+        [[ -z "$setup_cmd" ]] || log_info "[DRY-RUN] [SETUP] Extra setup command: $setup_cmd"
+        return "$OK"
     fi
 
-    if [ -n "\$APP_PORT_VALUE" ]; then
-        NGINX_BODY="server {
-    listen 80;
-    server_name \$SERVER_NAME;
-
-    location / {
-        proxy_pass http://127.0.0.1:\$APP_PORT_VALUE;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \\\$host;
-        proxy_cache_bypass \\\$http_upgrade;
-    }
-}"
-    elif [ "\$APP_KIND" = "frontend" ]; then
-        NGINX_BODY="server {
-    listen 80;
-    server_name \$SERVER_NAME;
-    root \$TARGET_PATH;
-    index index.html;
-
-    location / {
-        try_files \\\$uri \\\$uri/ /index.html;
-    }
-}"
-    else
-        return 0
-    fi
-
-    if [ -d /etc/nginx/sites-available ]; then
-        CONF_NAME="pipepilot-\$(echo "\$SERVER_NAME" | tr -c 'A-Za-z0-9_.-' '_')"
-        echo "\$NGINX_BODY" | \$SUDO tee "/etc/nginx/sites-available/\$CONF_NAME" >/dev/null
-        \$SUDO ln -sf "/etc/nginx/sites-available/\$CONF_NAME" "/etc/nginx/sites-enabled/\$CONF_NAME"
-        \$SUDO nginx -t
-        \$SUDO systemctl reload nginx || \$SUDO service nginx reload || true
-    elif [ -d /etc/nginx/conf.d ]; then
-        CONF_NAME="pipepilot-\$(echo "\$SERVER_NAME" | tr -c 'A-Za-z0-9_.-' '_').conf"
-        echo "\$NGINX_BODY" | \$SUDO tee "/etc/nginx/conf.d/\$CONF_NAME" >/dev/null
-        \$SUDO nginx -t
-        \$SUDO systemctl reload nginx || \$SUDO service nginx reload || true
-    fi
-}
-
-install_packages
-\$SUDO mkdir -p "\$TARGET_PATH"
-\$SUDO chown -R "\$REMOTE_USER_NAME":"\$REMOTE_USER_NAME" "\$TARGET_PATH" 2>/dev/null || true
-configure_nginx
-
-if [ -n "\$EXTRA_SETUP_CMD" ]; then
-    bash -lc "\$EXTRA_SETUP_CMD"
-fi
-SETUP
-)" || return "$ERR_DEPLOY"
+    ssh_remote_script "$setup_env"$'\n'"$(< "$helper_path")" || return "$ERR_DEPLOY"
 
     log_info "[SETUP] Fresh-server setup completed -- kind $kind"
+    status_ok "Remote setup completed"
     return "$OK"
 }
 
@@ -507,8 +530,10 @@ stage_deploy() {
     fi
 
     if [[ "$REMOTE_MODE" -eq 1 ]]; then
+        apply_smart_remote_defaults
         validate_remote_config
         log_info "[DEPLOY] Remote mode enabled -- ${REMOTE_USER}@${REMOTE_HOST}:$TARGET_PATH via $TRANSFER_TOOL"
+        status_line "[DEPLOY] remote=${REMOTE_USER}@${REMOTE_HOST} transfer=$TRANSFER_TOOL"
         setup_remote_server || return "$ERR_DEPLOY"
     fi
 
@@ -530,6 +555,7 @@ stage_deploy() {
         log_info "[DEPLOY] Dry-run remote upload simulated for $REMOTE_HOST:$TARGET_PATH"
     elif [[ "$REMOTE_MODE" -eq 1 ]]; then
         log_info "[DEPLOY] Files uploaded to $REMOTE_HOST:$TARGET_PATH"
+        status_ok "Uploaded files to $REMOTE_HOST:$TARGET_PATH"
     fi
 
     if [[ -n "$REMOTE_CMD" ]]; then
