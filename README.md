@@ -1,6 +1,6 @@
 # PipePilot
 
-![PipePilot logo](assets/pipepilot_banner.png)
+![PipePilot banner](https://raw.githubusercontent.com/simoderyouch/PipePilot/main/assets/pipepilot_banner.png)
 
 **Automate. Validate. Deploy. Rollback safely.**
 
@@ -56,8 +56,6 @@ Local machine:
 - `rsync` or `scp` for remote deployment
 - Node.js/npm for Node projects
 - Python 3 for Python projects
-- Optional terminal logo renderers: `chafa`, `viu`, `imgcat`, Kitty, WezTerm,
-  or ImageMagick
 
 Remote server:
 
@@ -65,6 +63,15 @@ Remote server:
 - A user with permission to create the target directory
 - `sudo` access when using `--setup-server` for package installation, nginx, or
   systemd service creation
+
+## Security Notes
+
+- Keep SSH private keys outside the repository, for example under `~/.ssh/`.
+- Do not commit real server IP addresses, private hostnames, or deployment-only
+  URLs in public documentation.
+- Use placeholder hosts such as `myserver.com` or `api.example.com` in examples.
+- Review generated logs and scenario notes before publishing; remote deployment
+  output can include hosts, target paths, and smoke-test URLs.
 
 ## Installation
 
@@ -97,7 +104,9 @@ Show all options:
 
 ## Frontend Deployment
 
-Deploy an already configured frontend project:
+Deploy an already configured frontend project. PipePilot detects the build
+script, chooses `dist/`, `build/`, `out/`, or `public/`, prepares nginx, picks a
+remote target, and smoke-tests the public URL:
 
 ```bash
 ./pipepilot \
@@ -106,14 +115,11 @@ Deploy an already configured frontend project:
   --remote \
   --host myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
-  --target /var/www/frontend \
-  --deploy-dir dist \
-  --build-cmd "npm run build" \
-  --url https://myserver.com
+  --key ~/.ssh/pipepilot_deploy_key
 ```
 
-Prepare a fresh server, install nginx, upload `dist/`, and configure the domain:
+Override the smart defaults when a deployment needs a custom path, output
+folder, or domain:
 
 ```bash
 ./pipepilot \
@@ -124,12 +130,10 @@ Prepare a fresh server, install nginx, upload `dist/`, and configure the domain:
   --app-kind frontend \
   --host myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
+  --key ~/.ssh/pipepilot_deploy_key \
   --target /var/www/frontend \
   --deploy-dir dist \
-  --domain myserver.com \
-  --build-cmd "npm run build" \
-  --url https://myserver.com
+  --domain myserver.com
 ```
 
 ## Backend Deployment
@@ -146,7 +150,7 @@ Deploy a Python backend and let PipePilot create the service automatically:
   --backend-runtime python \
   --host api.myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
+  --key ~/.ssh/pipepilot_deploy_key \
   --target /srv/backend \
   --app-port 8000 \
   --domain api.myserver.com \
@@ -165,7 +169,7 @@ Deploy a Node.js backend with a custom start command:
   --backend-runtime node \
   --host api.myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
+  --key ~/.ssh/pipepilot_deploy_key \
   --target /srv/api \
   --app-port 3000 \
   --start-cmd "node server.js" \
@@ -186,6 +190,54 @@ When `--app-kind backend` is used, PipePilot can infer how to run the app:
 
 Use `--start-cmd` and `--service-name` when your backend needs explicit control.
 
+## Example Backend API Scenario
+
+The repository includes a small FastAPI backend example at
+`examples/exemples/python-backend-api`. It is useful for demonstrating a full
+remote backend deployment from a clean Linux server state.
+
+The example API exposes:
+
+- `GET /`
+- `GET /health`
+- `GET /items`
+- `GET /items/{item_id}`
+
+Deploy it with smart defaults:
+
+```bash
+./pipepilot \
+  -p examples/exemples/python-backend-api \
+  -e production \
+  --remote \
+  --host api.example.com \
+  --user ubuntu \
+  --key ~/.ssh/pipepilot_deploy_key
+```
+
+PipePilot detects the Python backend, uploads the project to a generated
+`/srv/<project-name>` target, installs backend dependencies on the remote
+server, creates a systemd service, configures nginx as a reverse proxy, and
+smoke-tests the inferred URL.
+
+The expected successful run includes these high-level events:
+
+```text
+[DETECT] project_type=python
+[SMART] target=/srv/python-backend-api
+[SMART] deploy_source=.
+[SMART] setup=enabled
+[SETUP] app_kind=backend runtime=python packages="python3 python3-pip python3-venv nginx rsync curl"
+[OK]  Remote setup completed
+[OK]  Uploaded files
+[OK]  Smoke URL reachable
+[OK]  Pipeline completed successfully
+```
+
+The detailed scenario notes live in `backend_senario.md`; keep that file
+sanitized before publishing because deployment logs can contain real hosts,
+URLs, and local key paths.
+
 ## Important Options
 
 | Option | Purpose |
@@ -194,19 +246,20 @@ Use `--start-cmd` and `--service-name` when your backend needs explicit control.
 | `-e staging\|production` | Target environment |
 | `-d`, `--dry-run` | Simulate actions without changing deployment targets |
 | `--remote` | Enable SSH remote deployment |
-| `--setup-server` | Prepare a fresh Linux server before upload |
-| `--app-kind frontend\|backend` | Tell PipePilot what kind of app is being deployed |
+| `--setup-server` | Prepare a fresh Linux server before upload; remote mode enables this automatically unless disabled |
+| `--no-setup-server` | Disable automatic remote server preparation |
+| `--app-kind frontend\|backend` | Tell PipePilot what kind of app is being deployed; defaults to auto |
 | `--backend-runtime python\|node` | Select backend runtime |
-| `--host <host>` | Remote server IP address or domain |
+| `--host <host>` | Remote server hostname or domain |
 | `--user <user>` | SSH username |
 | `--key <path>` | SSH private key |
-| `--target <path>` | Deployment directory |
-| `--deploy-dir <dir>` | Local build directory to upload |
-| `--domain <domain>` | nginx server name |
+| `--target <path>` | Deployment directory; remote mode infers `/var/www/<name>` for frontends and `/srv/<name>` for backends |
+| `--deploy-dir <dir>` | Local build directory to upload; auto-detects `dist`, `build`, `out`, or `public` |
+| `--domain <domain>` | nginx server name; inferred from `--host` when the host is a domain name |
 | `--app-port <port>` | Backend port for reverse proxy and service env |
 | `--start-cmd "<cmd>"` | Override backend start command |
 | `--service-name <name>` | Override generated systemd service name |
-| `--url <url>` | Smoke-test URL |
+| `--url <url>` | Smoke-test URL; remote mode infers `http://<domain-or-host>` |
 | `--port <port>` | Smoke-test port |
 
 ## Execution Modes
@@ -220,7 +273,29 @@ Use `--start-cmd` and `--service-name` when your backend needs explicit control.
 
 ## Logs And Archives
 
-Logs are written in a structured format:
+Normal mode prints a compact run summary to the terminal:
+
+```text
+PipePilot run
+Project: /path/to/app
+Environment: production
+Structured log: logs/history.log
+Raw output: logs/run-2026-05-01-13-09-26-12345.raw.log
+
+[RUN] GIT
+[OK]  GIT
+[RUN] DEPLOY
+[SMART] Target: /var/www/app
+[SMART] Deploy source: dist
+[SETUP] kind=frontend runtime=none packages="nginx rsync curl"
+[OK]  Pipeline completed successfully
+```
+
+Detailed command output from tools such as `npm`, `apt`, `rsync`, and `ssh` is
+stored in a per-run raw log. Use `-v` when you want that raw output streamed to
+the terminal.
+
+Structured logs are written in this format:
 
 ```text
 yyyy-mm-dd-hh-mm-ss : username : INFOS : message
@@ -231,6 +306,7 @@ Default paths:
 
 ```text
 logs/history.log
+logs/run-<timestamp>-<pid>.raw.log
 archives/
 ```
 
@@ -254,7 +330,7 @@ PipePilot/
 ├── hooks/                     # Pre/post deploy extension points
 ├── tests/                     # Runnable deployment scenarios
 ├── docs/                      # Usage and versioning notes
-├── assets/                    # GitHub and CLI logo images
+├── assets/                    # README banner and logo images
 ├── VERSION
 └── CHANGELOG.md
 ```
