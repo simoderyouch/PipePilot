@@ -4,6 +4,21 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.8.0] - 2026-05-01
+
+### Added
+
+- Automatic remote defaults for production frontend and backend deployments.
+- Remote setup helper for fresh-server nginx, dependency, and proxy setup.
+- Clean production deployment scenario notes for the portfolio and backend API.
+- Backend API deployment documentation for port `6000` behind `/api/`.
+
+### Changed
+
+- Kept normal PipePilot output cleaner while preserving raw command logs.
+- Updated remote usage docs to explain inferred targets, deploy sources, setup,
+  and shared frontend/backend nginx behavior.
+
 ## [0.7.3] - 2026-04-30
 
 ### Changed
