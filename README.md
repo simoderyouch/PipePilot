@@ -1,6 +1,6 @@
 # PipePilot
 
-![PipePilot banner](assets/pipepilot_banner.webp)
+![PipePilot banner](assets/pipepilot_banner.jpg)
 
 **Automate. Validate. Deploy. Rollback safely.**
 
