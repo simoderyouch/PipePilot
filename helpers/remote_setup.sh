@@ -33,12 +33,30 @@ install_packages() {
     pm="$(detect_pm)"
     case "$APP_KIND:$BACKEND_RUNTIME_VALUE:$pm" in
         backend:python:apk) PACKAGES="python3 py3-pip py3-virtualenv nginx rsync curl" ;;
+        backend:docker:apk|backend:compose:apk) PACKAGES="docker docker-cli-compose nginx rsync curl" ;;
+        backend:docker:dnf|backend:compose:dnf) PACKAGES="docker docker-compose-plugin nginx rsync curl" ;;
+        backend:docker:yum|backend:compose:yum) PACKAGES="docker docker-compose-plugin nginx rsync curl" ;;
+        stack:*:apk) PACKAGES="docker docker-cli-compose rsync curl" ;;
+        stack:*:dnf) PACKAGES="docker docker-compose-plugin rsync curl" ;;
+        stack:*:yum) PACKAGES="docker docker-compose-plugin rsync curl" ;;
     esac
 
     case "$pm" in
         apt)
             $SUDO apt-get update -y
-            DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y $PACKAGES
+            if [ "$APP_KIND" = "stack" ]; then
+                DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker.io rsync curl
+                DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose-plugin >/dev/null 2>&1 || \
+                    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose-v2 >/dev/null 2>&1 || \
+                    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose >/dev/null 2>&1 || true
+            elif [ "$BACKEND_RUNTIME_VALUE" = "docker" ] || [ "$BACKEND_RUNTIME_VALUE" = "compose" ]; then
+                DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker.io nginx rsync curl
+                DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose-plugin >/dev/null 2>&1 || \
+                    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose-v2 >/dev/null 2>&1 || \
+                    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y docker-compose >/dev/null 2>&1 || true
+            else
+                DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y $PACKAGES
+            fi
             ;;
         dnf)
             $SUDO dnf install -y $PACKAGES
@@ -54,6 +72,12 @@ install_packages() {
             exit 113
             ;;
     esac
+
+    if command -v docker >/dev/null 2>&1; then
+        $SUDO systemctl enable docker >/dev/null 2>&1 || true
+        $SUDO systemctl start docker >/dev/null 2>&1 || true
+        $SUDO usermod -aG docker "$REMOTE_USER_NAME" >/dev/null 2>&1 || true
+    fi
 }
 
 configure_nginx() {

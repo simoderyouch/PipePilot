@@ -3,8 +3,8 @@
 #
 # This file creates the deployable artifact. It supports custom build commands,
 # clean builds, dependency installation, build.sh, Makefile, Node.js frontends
-# or backends, Python backends, and frontend projects that do not need
-# compilation.
+# or backends, Python backends, Dockerfile/Compose projects, and frontend
+# projects that do not need compilation.
 
 stage_build() {
     if [[ "$SKIP_BUILD" -eq 1 ]]; then
@@ -17,12 +17,16 @@ stage_build() {
     status_line "[BUILD] project_type=$PROJECT_TYPE"
 
     if [[ "$CLEAN" -eq 1 ]]; then
-        run_shell_in_project "rm -rf build dist out target" || return "$ERR_BUILD"
+        run_shell_in_project "rm -rf build dist out target .pipepilot-docker" || return "$ERR_BUILD"
         log_info "[BUILD] Cleaned old build directories"
     fi
 
     if [[ "$INSTALL_DEPS" -eq 1 ]]; then
         case "$PROJECT_TYPE" in
+            docker-compose|docker)
+                log_info "[BUILD] Docker dependencies will be installed on the remote host"
+                status_line "[BUILD] docker runtime dependencies deferred to setup"
+                ;;
             node)
                 require_command npm "$ERR_DEPENDENCY"
                 run_shell_in_project "npm install" || return "$ERR_BUILD"
@@ -49,6 +53,35 @@ stage_build() {
         run_shell_in_project "make" || return "$ERR_BUILD"
     else
         case "$PROJECT_TYPE" in
+            docker-compose)
+                if [[ "$REMOTE_MODE" -eq 1 ]]; then
+                    log_info "[BUILD] Docker Compose build will run on the remote host"
+                    status_line "[BUILD] remote docker compose build deferred to deploy"
+                else
+                    require_command docker "$ERR_DEPENDENCY"
+                    local compose_path compose_file
+                    compose_path="$(docker_compose_file)" || return "$ERR_BUILD"
+                    compose_file="$(relative_compose_file "$compose_path")"
+                    status_line "[BUILD] running docker compose build"
+                    if docker compose version >/dev/null 2>&1; then
+                        run_shell_in_project "docker compose -f '$compose_file' build" || return "$ERR_BUILD"
+                    elif command -v docker-compose >/dev/null 2>&1; then
+                        run_shell_in_project "docker-compose -f '$compose_file' build" || return "$ERR_BUILD"
+                    else
+                        return "$ERR_DEPENDENCY"
+                    fi
+                fi
+                ;;
+            docker)
+                if [[ "$REMOTE_MODE" -eq 1 ]]; then
+                    log_info "[BUILD] Dockerfile build will run on the remote host"
+                    status_line "[BUILD] remote docker build deferred to deploy"
+                else
+                    require_command docker "$ERR_DEPENDENCY"
+                    status_line "[BUILD] running docker build"
+                    run_shell_in_project "docker build -t pipepilot-$(basename "$PROJECT_PATH"):local ." || return "$ERR_BUILD"
+                fi
+                ;;
             node)
                 require_command npm "$ERR_DEPENDENCY"
                 if [[ -f "$PROJECT_PATH/package-lock.json" ]]; then

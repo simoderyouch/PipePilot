@@ -15,6 +15,48 @@ run_hook() {
     fi
 }
 
+docker_compose_file() {
+    if [[ -n "$COMPOSE_FILE" ]]; then
+        if [[ "$COMPOSE_FILE" = /* ]]; then
+            if [[ -f "$COMPOSE_FILE" ]]; then
+                echo "$COMPOSE_FILE"
+                return 0
+            fi
+        else
+            if [[ -f "$PROJECT_PATH/$COMPOSE_FILE" ]]; then
+                echo "$PROJECT_PATH/$COMPOSE_FILE"
+                return 0
+            fi
+        fi
+        return 1
+    fi
+
+    local candidate
+    for candidate in compose.yaml compose.yml docker-compose.yml docker-compose.yaml; do
+        if [[ -f "$PROJECT_PATH/$candidate" ]]; then
+            echo "$PROJECT_PATH/$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+relative_compose_file() {
+    local compose_path="$1"
+    if [[ "$compose_path" == "$PROJECT_PATH/"* ]]; then
+        echo "${compose_path#"$PROJECT_PATH/"}"
+    else
+        echo "$compose_path"
+    fi
+}
+
+project_uses_docker() {
+    [[ "$PROJECT_TYPE" == "docker-compose" || "$PROJECT_TYPE" == "docker" ]] && return 0
+    docker_compose_file >/dev/null 2>&1 && return 0
+    [[ -f "$PROJECT_PATH/Dockerfile" || -f "$PROJECT_PATH/dockerfile" ]]
+}
+
 deployment_source() {
     # --deploy-dir lets users upload a specific build output such as dist/,
     # build/, out/, public/, or any custom folder created by the build step.
@@ -24,6 +66,11 @@ deployment_source() {
         else
             echo "$PROJECT_PATH/$DEPLOY_DIR"
         fi
+        return 0
+    fi
+
+    if project_uses_docker; then
+        echo "$PROJECT_PATH"
         return 0
     fi
 
@@ -166,7 +213,7 @@ smart_remote_target() {
     local kind="$1"
     local name
 
-    if [[ "$kind" == "backend" ]]; then
+    if [[ "$kind" == "backend" || "$kind" == "stack" ]]; then
         name="$(safe_path_name "$(basename "$PROJECT_PATH")")"
         echo "/srv/$name"
         return 0
@@ -234,7 +281,9 @@ effective_app_kind() {
         return 0
     fi
 
-    if [[ -n "$DEPLOY_DIR" && "$DEPLOY_DIR" =~ (^|/)(dist|build|public)$ ]]; then
+    if project_uses_docker; then
+        echo "stack"
+    elif [[ -n "$DEPLOY_DIR" && "$DEPLOY_DIR" =~ (^|/)(dist|build|public)$ ]]; then
         echo "frontend"
     elif [[ -n "$APP_PORT" || "$PROJECT_TYPE" == "python" ]]; then
         echo "backend"
@@ -248,6 +297,10 @@ effective_app_kind() {
 effective_backend_runtime() {
     if [[ "$BACKEND_RUNTIME" != "auto" ]]; then
         echo "$BACKEND_RUNTIME"
+    elif docker_compose_file >/dev/null 2>&1; then
+        echo "compose"
+    elif [[ "$PROJECT_TYPE" == "docker" ]]; then
+        echo "docker"
     elif [[ "$PROJECT_TYPE" == "python" ]]; then
         echo "python"
     elif [[ "$PROJECT_TYPE" == "node" ]]; then
@@ -343,11 +396,16 @@ setup_package_list() {
             echo "nginx rsync curl"
             ;;
         backend)
-            if [[ "$runtime" == "python" ]]; then
+            if [[ "$runtime" == "compose" || "$runtime" == "docker" ]]; then
+                echo "docker.io nginx rsync curl"
+            elif [[ "$runtime" == "python" ]]; then
                 echo "python3 python3-pip python3-venv nginx rsync curl"
             else
                 echo "nodejs npm nginx rsync curl"
             fi
+            ;;
+        stack)
+            echo "docker.io rsync curl"
             ;;
     esac
 }
@@ -358,7 +416,7 @@ setup_remote_server() {
     local kind runtime packages server_name proxy_port setup_cmd target_path package_manager remote_user helper_path setup_env
     local kind_q runtime_q packages_q server_name_q proxy_port_q setup_cmd_q target_path_q package_manager_q remote_user_q
     kind="$(effective_app_kind)"
-    if [[ "$kind" == "backend" ]]; then
+    if [[ "$kind" == "backend" || "$kind" == "stack" ]]; then
         runtime="$(effective_backend_runtime)"
     else
         runtime="none"
@@ -367,6 +425,14 @@ setup_remote_server() {
     server_name="$(effective_server_name)"
     if [[ "$kind" == "backend" ]]; then
         proxy_port="$(effective_app_port)"
+    elif [[ "$kind" == "stack" ]]; then
+        if [[ -n "$APP_PORT" ]]; then
+            proxy_port="$APP_PORT"
+        elif docker_compose_file >/dev/null 2>&1; then
+            proxy_port=""
+        else
+            proxy_port="$(effective_app_port)"
+        fi
     else
         proxy_port="$APP_PORT"
     fi
@@ -409,8 +475,10 @@ SETUP_ENV
         log_info "[DRY-RUN] [SETUP] Would create target directory: $target_path"
         if [[ "$kind" == "frontend" || -n "$proxy_port" ]]; then
             log_info "[DRY-RUN] [SETUP] Would configure nginx for ${server_name}"
+            status_line "[SETUP] dry-run: would install packages, create target, and configure nginx"
+        else
+            status_line "[SETUP] dry-run: would install packages and create target"
         fi
-        status_line "[SETUP] dry-run: would install packages, create target, and configure nginx"
         [[ -z "$setup_cmd" ]] || log_info "[DRY-RUN] [SETUP] Extra setup command: $setup_cmd"
         return "$OK"
     fi
@@ -422,11 +490,116 @@ SETUP_ENV
     return "$OK"
 }
 
+configure_docker_runtime() {
+    [[ "$REMOTE_MODE" -eq 1 ]] || return "$OK"
+    project_uses_docker || return "$OK"
+
+    local runtime compose_path compose_file service_name target_path port
+    local runtime_q compose_file_q service_name_q target_path_q port_q
+    runtime="$(effective_backend_runtime)"
+    compose_path="$(docker_compose_file || true)"
+    if [[ -n "$compose_path" ]]; then
+        runtime="compose"
+        compose_file="$(relative_compose_file "$compose_path")"
+    else
+        runtime="docker"
+        compose_file=""
+    fi
+    service_name="$(effective_service_name)"
+    target_path="$TARGET_PATH"
+    port="$(effective_app_port)"
+
+    printf -v runtime_q '%q' "$runtime"
+    printf -v compose_file_q '%q' "$compose_file"
+    printf -v service_name_q '%q' "$service_name"
+    printf -v target_path_q '%q' "$target_path"
+    printf -v port_q '%q' "$port"
+
+    if [[ "$runtime" == "compose" ]]; then
+        log_info "[DOCKER] Runtime detected -- compose -- file: $compose_file"
+        status_line "[DOCKER] runtime=compose file=$compose_file"
+    else
+        log_info "[DOCKER] Runtime detected -- dockerfile -- image/service: $service_name -- port: $port"
+        status_line "[DOCKER] runtime=dockerfile service=$service_name port=$port"
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        if [[ "$runtime" == "compose" ]]; then
+            log_info "[DRY-RUN] [DOCKER] Would run docker compose up -d --build in $target_path"
+        else
+            log_info "[DRY-RUN] [DOCKER] Would build Dockerfile and restart container $service_name on port $port"
+        fi
+        return "$OK"
+    fi
+
+    ssh_remote_script "$(cat <<DOCKER
+set -euo pipefail
+
+DOCKER_RUNTIME_VALUE=$runtime_q
+COMPOSE_FILE_VALUE=$compose_file_q
+SERVICE_NAME_VALUE=$service_name_q
+TARGET_PATH=$target_path_q
+APP_PORT_VALUE=$port_q
+
+if [ "\$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
+cd "\$TARGET_PATH"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is not installed on the remote host" >&2
+    exit 113
+fi
+
+\$SUDO systemctl enable docker >/dev/null 2>&1 || true
+\$SUDO systemctl start docker >/dev/null 2>&1 || true
+
+compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        echo "docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        echo "docker-compose"
+    else
+        return 1
+    fi
+}
+
+if [ "\$DOCKER_RUNTIME_VALUE" = "compose" ]; then
+    COMPOSE_CMD="\$(compose_cmd)" || {
+        echo "Docker Compose is not installed on the remote host" >&2
+        exit 113
+    }
+    \$SUDO \$COMPOSE_CMD -f "\$COMPOSE_FILE_VALUE" up -d --build --remove-orphans
+else
+    DOCKERFILE="Dockerfile"
+    if [ ! -f "\$DOCKERFILE" ] && [ -f dockerfile ]; then
+        DOCKERFILE="dockerfile"
+    fi
+    \$SUDO docker build -f "\$DOCKERFILE" -t "\$SERVICE_NAME_VALUE:latest" .
+    \$SUDO docker rm -f "\$SERVICE_NAME_VALUE" >/dev/null 2>&1 || true
+    \$SUDO docker run -d \\
+        --name "\$SERVICE_NAME_VALUE" \\
+        --restart unless-stopped \\
+        -p "\$APP_PORT_VALUE:\$APP_PORT_VALUE" \\
+        -e PORT="\$APP_PORT_VALUE" \\
+        "\$SERVICE_NAME_VALUE:latest"
+fi
+DOCKER
+)" || return "$ERR_DEPLOY"
+
+    log_info "[DOCKER] Docker runtime configured and restarted"
+    return "$OK"
+}
+
 configure_backend_runtime() {
     local kind runtime port start_cmd service_name target_path remote_user
     local runtime_q port_q start_cmd_q service_name_q target_path_q remote_user_q
     kind="$(effective_app_kind)"
     [[ "$REMOTE_MODE" -eq 1 && "$kind" == "backend" ]] || return "$OK"
+    project_uses_docker && return "$OK"
 
     runtime="$(effective_backend_runtime)"
     port="$(effective_app_port)"
@@ -542,10 +715,12 @@ stage_deploy() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log_info "[DEPLOY] Dry-run deployment from $source_dir to $TARGET_PATH"
         if [[ "$REMOTE_MODE" -eq 1 ]]; then
+            configure_docker_runtime || return "$ERR_DEPLOY"
             configure_backend_runtime || return "$ERR_DEPLOY"
         fi
     elif [[ "$REMOTE_MODE" -eq 1 ]]; then
         copy_remote "$source_dir" || return "$ERR_DEPLOY"
+        configure_docker_runtime || return "$ERR_DEPLOY"
         configure_backend_runtime || return "$ERR_DEPLOY"
     else
         copy_local "$source_dir" || return "$ERR_DEPLOY"

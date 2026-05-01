@@ -32,12 +32,15 @@ restore the latest archive.
 
 - Frontend deployment with automatic `dist/`, `build/`, or `public/` upload.
 - Backend deployment for Python and Node.js projects.
+- Dockerfile and Docker Compose deployment for full-stack projects and
+  frontend/backend monorepos.
 - Smart fresh-server setup through SSH with `--setup-server`.
 - Automatic backend dependency installation after upload.
 - Automatic backend service creation with systemd.
 - Python backend start detection for FastAPI, Flask, `app.py`, and `main.py`.
 - Node.js backend start detection for `npm start`, `server.js`, `app.js`,
   `index.js`, and `main.js`.
+- Automatic Docker installation on fresh remote servers for Docker deployments.
 - Remote transfer through `rsync` or `scp`.
 - nginx setup for frontend hosting and backend reverse proxying.
 - Structured deployment logs in `history.log`.
@@ -56,6 +59,7 @@ Local machine:
 - `rsync` or `scp` for remote deployment
 - Node.js/npm for Node projects
 - Python 3 for Python projects
+- Docker for local Docker builds when not deploying remotely
 
 Remote server:
 
@@ -63,6 +67,8 @@ Remote server:
 - A user with permission to create the target directory
 - `sudo` access when using `--setup-server` for package installation, nginx, or
   systemd service creation
+- Docker support is installed automatically for Dockerfile and Compose projects
+  when remote setup is enabled
 
 ## Security Notes
 
@@ -189,6 +195,54 @@ When `--app-kind backend` is used, PipePilot can infer how to run the app:
 | nginx | Creates a reverse proxy when `--domain` and `--app-port` are provided |
 
 Use `--start-cmd` and `--service-name` when your backend needs explicit control.
+
+## Docker And Compose Deployment
+
+PipePilot detects Docker projects automatically:
+
+- `compose.yml`, `compose.yaml`, `docker-compose.yml`, or
+  `docker-compose.yaml` means a Docker Compose stack.
+- `Dockerfile` means a single Docker image/container.
+
+For Compose projects, PipePilot uploads the whole project to `/srv/<name>`,
+installs Docker on the remote server, then runs:
+
+```bash
+docker compose -f <compose-file> up -d --build --remove-orphans
+```
+
+Use this for full-stack repos with multiple services:
+
+```bash
+./pipepilot \
+  -p ./my-fullstack-app \
+  -e production \
+  --remote \
+  --host app.example.com \
+  --user ubuntu \
+  --key ~/.ssh/pipepilot_deploy_key \
+  --compose-file compose.yml \
+  --url http://app.example.com/health
+```
+
+For a single `Dockerfile`, PipePilot builds and restarts one container. Use
+`--app-port` when the container should be exposed through the same host port:
+
+```bash
+./pipepilot \
+  -p ./docker-api \
+  -e production \
+  --remote \
+  --host api.example.com \
+  --user ubuntu \
+  --key ~/.ssh/pipepilot_deploy_key \
+  --app-port 6000 \
+  --url http://api.example.com/health
+```
+
+When `--app-port` is provided, remote setup can also generate an nginx reverse
+proxy to that port. For Compose stacks without `--app-port`, PipePilot leaves
+port mapping to the Compose file.
 
 ## Port Options
 
@@ -321,8 +375,9 @@ URLs, and local key paths.
 | `--remote` | Enable SSH remote deployment |
 | `--setup-server` | Prepare a fresh Linux server before upload; remote mode enables this automatically unless disabled |
 | `--no-setup-server` | Disable automatic remote server preparation |
-| `--app-kind frontend\|backend` | Tell PipePilot what kind of app is being deployed; defaults to auto |
-| `--backend-runtime python\|node` | Select backend runtime |
+| `--app-kind frontend\|backend\|stack` | Tell PipePilot what kind of app is being deployed; defaults to auto |
+| `--backend-runtime python\|node\|docker\|compose` | Select backend/runtime mode |
+| `--compose-file <file>` | Select a Docker Compose file; auto-detects common Compose filenames |
 | `--host <host>` | Remote server hostname or domain |
 | `--user <user>` | SSH username |
 | `--key <path>` | SSH private key |
