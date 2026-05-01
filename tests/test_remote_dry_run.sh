@@ -10,12 +10,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="$ROOT_DIR/tests/tmp/remote_frontend_project"
 BACKEND_DIR="$ROOT_DIR/tests/tmp/remote_backend_project"
+DOCKER_DIR="$ROOT_DIR/tests/tmp/remote_compose_project"
 ARCHIVE_DIR="$ROOT_DIR/tests/tmp/archives/remote"
 LOG_DIR="$ROOT_DIR/tests/tmp/logs/remote"
 KEY_PATH="$ROOT_DIR/tests/tmp/fake_remote_key.pem"
 
-rm -rf "$WORK_DIR" "$BACKEND_DIR" "$ARCHIVE_DIR" "$LOG_DIR"
-mkdir -p "$WORK_DIR/dist" "$BACKEND_DIR/tests" "$(dirname "$KEY_PATH")"
+rm -rf "$WORK_DIR" "$BACKEND_DIR" "$DOCKER_DIR" "$ARCHIVE_DIR" "$LOG_DIR"
+mkdir -p "$WORK_DIR/dist" "$BACKEND_DIR/tests" "$DOCKER_DIR/frontend" "$DOCKER_DIR/backend" "$(dirname "$KEY_PATH")"
 
 cat > "$WORK_DIR/dist/index.html" <<'HTML'
 <!doctype html>
@@ -73,6 +74,30 @@ def test_health():
     assert health() == {"status": "ok"}
 PY
 
+cat > "$DOCKER_DIR/compose.yml" <<'YAML'
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+  backend:
+    build: ./backend
+    ports:
+      - "6000:6000"
+YAML
+
+cat > "$DOCKER_DIR/frontend/Dockerfile" <<'DOCKER'
+FROM nginx:alpine
+RUN printf '<h1>PipePilot Compose Frontend</h1>\n' > /usr/share/nginx/html/index.html
+DOCKER
+
+cat > "$DOCKER_DIR/backend/Dockerfile" <<'DOCKER'
+FROM python:3.12-alpine
+WORKDIR /app
+RUN printf 'print("ok")\n' > app.py
+CMD ["python", "app.py"]
+DOCKER
+
 "$ROOT_DIR/pipepilot" \
     -d \
     -p "$WORK_DIR" \
@@ -122,6 +147,18 @@ PY
     --domain api.example.com \
     --app-port 8000 \
     --service-name pipepilot-backend-demo \
+    --archive-dir "$ARCHIVE_DIR" \
+    -l "$LOG_DIR"
+
+"$ROOT_DIR/pipepilot" \
+    -d \
+    -p "$DOCKER_DIR" \
+    -e production \
+    --remote \
+    --host compose.example.com \
+    --user deploy \
+    --key "$KEY_PATH" \
+    --compose-file compose.yml \
     --archive-dir "$ARCHIVE_DIR" \
     -l "$LOG_DIR"
 

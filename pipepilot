@@ -65,6 +65,7 @@ START_CMD=""
 SERVICE_NAME=""
 PACKAGE_MANAGER="auto"
 SETUP_CMD=""
+COMPOSE_FILE=""
 SMOKE_URL=""
 SMOKE_PORT=""
 RETRIES=""
@@ -113,6 +114,7 @@ CLI_START_CMD_SET=0
 CLI_SERVICE_NAME_SET=0
 CLI_PACKAGE_MANAGER_SET=0
 CLI_SETUP_CMD_SET=0
+CLI_COMPOSE_FILE_SET=0
 CLI_URL_SET=0
 CLI_PORT_SET=0
 CLI_RETRIES_SET=0
@@ -197,14 +199,15 @@ DEPLOY OPTIONS
     --transfer <tool>      Transfer tool for remote mode: rsync | scp
     --setup-server         Prepare a fresh remote Linux server before upload
     --no-setup-server      Disable automatic remote server preparation
-    --app-kind <kind>      auto | frontend | backend
-    --backend-runtime <rt> auto | python | node
+    --app-kind <kind>      auto | frontend | backend | stack
+    --backend-runtime <rt> auto | python | node | docker | compose
     --domain <domain>      Domain/server_name for generated nginx config; inferred from --host when host is a name
     --app-port <port>      Backend app port used by generated reverse proxy
     --start-cmd "<cmd>"    Backend start command, auto-detected when omitted
     --service-name <name>  systemd service name for backend auto-start
     --package-manager <pm> auto | apt | dnf | yum | apk
     --setup-cmd "<cmd>"    Extra setup command executed before upload
+    --compose-file <file>  Docker Compose file to use; auto-detected when omitted
 
 SMOKE TEST OPTIONS
     --url <url>            URL for smoke test; remote mode infers http://<domain-or-host>
@@ -524,6 +527,7 @@ load_configs() {
     local cli_service_name="$SERVICE_NAME"
     local cli_package_manager="$PACKAGE_MANAGER"
     local cli_setup_cmd="$SETUP_CMD"
+    local cli_compose_file="$COMPOSE_FILE"
     local cli_url="$SMOKE_URL"
     local cli_port="$SMOKE_PORT"
 
@@ -549,6 +553,7 @@ load_configs() {
     SERVICE_NAME="${SERVICE_NAME:-}"
     PACKAGE_MANAGER="${PACKAGE_MANAGER:-auto}"
     SETUP_CMD="${SETUP_CMD:-}"
+    COMPOSE_FILE="${COMPOSE_FILE:-}"
     SMOKE_URL="${SMOKE_URL:-}"
     SMOKE_PORT="${SMOKE_PORT:-}"
 
@@ -570,6 +575,7 @@ load_configs() {
     [[ "$CLI_SERVICE_NAME_SET" -eq 0 ]] || SERVICE_NAME="$cli_service_name"
     [[ "$CLI_PACKAGE_MANAGER_SET" -eq 0 ]] || PACKAGE_MANAGER="$cli_package_manager"
     [[ "$CLI_SETUP_CMD_SET" -eq 0 ]] || SETUP_CMD="$cli_setup_cmd"
+    [[ "$CLI_COMPOSE_FILE_SET" -eq 0 ]] || COMPOSE_FILE="$cli_compose_file"
     [[ "$CLI_URL_SET" -eq 0 ]] || SMOKE_URL="$cli_url"
     [[ "$CLI_PORT_SET" -eq 0 ]] || SMOKE_PORT="$cli_port"
 }
@@ -832,6 +838,12 @@ parse_args() {
                 CLI_SETUP_CMD_SET=1
                 shift 2
                 ;;
+            --compose-file)
+                need_value "$1" "${2:-}"
+                COMPOSE_FILE="$2"
+                CLI_COMPOSE_FILE_SET=1
+                shift 2
+                ;;
             --url)
                 need_value "$1" "${2:-}"
                 SMOKE_URL="$2"
@@ -910,12 +922,12 @@ validate_options() {
     fi
 
     case "$APP_KIND" in
-        auto|frontend|backend) ;;
+        auto|frontend|backend|stack) ;;
         *) die "$ERR_CONFIG" "[CONFIG] Invalid app kind: $APP_KIND" ;;
     esac
 
     case "$BACKEND_RUNTIME" in
-        auto|python|node) ;;
+        auto|python|node|docker|compose) ;;
         *) die "$ERR_CONFIG" "[CONFIG] Invalid backend runtime: $BACKEND_RUNTIME" ;;
     esac
 

@@ -8,7 +8,11 @@
 detect_project_type() {
     # Detection is kept with the pull step because it happens immediately after
     # source recovery and prepares shared PROJECT_TYPE state for lint/test/build.
-    if [[ -f "$PROJECT_PATH/package.json" ]]; then
+    if docker_compose_file >/dev/null 2>&1; then
+        PROJECT_TYPE="docker-compose"
+    elif [[ -f "$PROJECT_PATH/Dockerfile" || -f "$PROJECT_PATH/dockerfile" ]]; then
+        PROJECT_TYPE="docker"
+    elif [[ -f "$PROJECT_PATH/package.json" ]]; then
         PROJECT_TYPE="node"
     elif find "$PROJECT_PATH" -maxdepth 2 -name "*.py" -print -quit | grep -q .; then
         PROJECT_TYPE="python"
@@ -45,6 +49,10 @@ stage_pull() {
     else
         log_info "[GIT] No git repository found; using existing local project files"
         status_line "[GIT] using local project files"
+    fi
+
+    if [[ -n "$COMPOSE_FILE" ]] && ! docker_compose_file >/dev/null 2>&1; then
+        die "$ERR_PROJECT_NOT_FOUND" "[DOCKER] Compose file not found: $COMPOSE_FILE"
     fi
 
     detect_project_type
