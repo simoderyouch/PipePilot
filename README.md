@@ -1,6 +1,6 @@
 # PipePilot
 
-![PipePilot banner](https://raw.githubusercontent.com/simoderyouch/PipePilot/main/assets/pipepilot_banner.png)
+![PipePilot banner](assets/pipepilot_banner.jpg)
 
 **Automate. Validate. Deploy. Rollback safely.**
 
@@ -190,6 +190,74 @@ When `--app-kind backend` is used, PipePilot can infer how to run the app:
 
 Use `--start-cmd` and `--service-name` when your backend needs explicit control.
 
+## Port Options
+
+PipePilot uses three different port options, depending on what part of the
+deployment you want to control:
+
+| Option | Used for |
+|---|---|
+| `--ssh-port <port>` | SSH connection port for remote upload and remote commands; defaults to `22` |
+| `--app-port <port>` | Backend application port used by systemd and nginx reverse proxy configuration |
+| `--port <port>` | Smoke-test port check, useful when you want to verify that a TCP port is reachable |
+
+Example backend deployment with explicit SSH, app, and smoke-test ports:
+
+```bash
+./pipepilot \
+  -p ./backend \
+  -e production \
+  --remote \
+  --setup-server \
+  --app-kind backend \
+  --backend-runtime python \
+  --host api.example.com \
+  --user ubuntu \
+  --key ~/.ssh/pipepilot_deploy_key \
+  --ssh-port 2222 \
+  --app-port 8000 \
+  --port 443 \
+  --url https://api.example.com/health
+```
+
+For backend services, `--app-port` is the port the app listens on behind nginx.
+For smoke tests, `--url` checks an HTTP endpoint and `--port` checks whether a
+network port is reachable.
+
+## Environment Handling
+
+PipePilot loads configuration in this order:
+
+```text
+configs/default.conf
+configs/<environment>.conf
+command-line options
+```
+
+The environment is selected with `-e staging` or `-e production`. If `-e` is not
+provided, PipePilot uses `DEFAULT_ENV` from `configs/default.conf`.
+
+Environment files can define deployment defaults such as:
+
+```text
+TARGET_PATH
+REMOTE_HOST
+REMOTE_USER
+REMOTE_KEY
+SSH_PORT
+DEPLOY_DIR
+APP_KIND
+BACKEND_RUNTIME
+DOMAIN_NAME
+APP_PORT
+SMOKE_URL
+SMOKE_PORT
+```
+
+Command-line options always win over config values, so a team can keep safe
+defaults in `configs/staging.conf` and `configs/production.conf`, then override
+one run with flags like `--target`, `--ssh-port`, `--app-port`, or `--url`.
+
 ## Example Backend API Scenario
 
 The repository includes a small FastAPI backend example at
@@ -253,6 +321,7 @@ URLs, and local key paths.
 | `--host <host>` | Remote server hostname or domain |
 | `--user <user>` | SSH username |
 | `--key <path>` | SSH private key |
+| `--ssh-port <port>` | SSH connection port; defaults to `22` |
 | `--target <path>` | Deployment directory; remote mode infers `/var/www/<name>` for frontends and `/srv/<name>` for backends |
 | `--deploy-dir <dir>` | Local build directory to upload; auto-detects `dist`, `build`, `out`, or `public` |
 | `--domain <domain>` | nginx server name; inferred from `--host` when the host is a domain name |
