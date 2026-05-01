@@ -78,6 +78,17 @@ PY
     -p "$WORK_DIR" \
     -e production \
     --remote \
+    --host 192.0.2.10 \
+    --user deploy \
+    --key "$KEY_PATH" \
+    --archive-dir "$ARCHIVE_DIR" \
+    -l "$LOG_DIR"
+
+"$ROOT_DIR/pipepilot" \
+    -d \
+    -p "$WORK_DIR" \
+    -e production \
+    --remote \
     --setup-server \
     --app-kind frontend \
     --host example.com \

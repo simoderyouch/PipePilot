@@ -8,6 +8,7 @@
 stage_lint() {
     if [[ "$SKIP_LINT" -eq 1 ]]; then
         log_info "[LINT] Skipped by --skip-lint"
+        status_line "[LINT] skipped by --skip-lint"
         return "$OK"
     fi
 
@@ -43,10 +44,18 @@ stage_lint() {
             ;;
         node)
             if [[ -f "$PROJECT_PATH/package.json" ]] && command -v npm >/dev/null 2>&1; then
-                if run_shell_in_project "npm run | grep -q '^  lint'"; then
-                    run_shell_in_project "npm run lint" || return "$ERR_LINT"
+                if package_json_has_script "lint"; then
+                    status_line "[LINT] running npm run lint"
+                    if ! run_shell_in_project "npm run lint"; then
+                        if [[ "$STRICT" -eq 1 ]]; then
+                            return "$ERR_LINT"
+                        fi
+                        log_info "[LINT] npm lint reported issues; continuing because --strict is not enabled"
+                        status_warn "Lint reported issues; continuing because --strict is not enabled"
+                    fi
                 else
                     log_info "[LINT] package.json has no lint script; skipping"
+                    status_line "[LINT] no npm lint script found"
                 fi
             else
                 [[ "$STRICT" -eq 0 ]] || return "$ERR_DEPENDENCY"

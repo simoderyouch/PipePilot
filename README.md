@@ -224,6 +224,11 @@ For backend services, `--app-port` is the port the app listens on behind nginx.
 For smoke tests, `--url` checks an HTTP endpoint and `--port` checks whether a
 network port is reachable.
 
+When a frontend and backend share the same host, PipePilot keeps the frontend at
+`/` and proxies the backend under `/api/`. For example, the frontend can stay at
+`http://example.com/` while the backend health check is available at
+`http://example.com/api/health`.
+
 ## Environment Handling
 
 PipePilot loads configuration in this order:

@@ -35,7 +35,6 @@ readonly ERR_HOOK=114
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
-LOGO_IMAGE="$SCRIPT_DIR/assets/pipepilot_logo.png"
 
 # --------------------------- Default settings ------------------------------
 # These values are loaded before configs/default.conf. The config file can
@@ -123,6 +122,8 @@ CLI_COMPRESS_SET=0
 CLI_KEEP_SET=0
 
 LOG_FILE=""
+RUN_ID=""
+RAW_LOG_FILE=""
 PROJECT_TYPE="unknown"
 LATEST_ARCHIVE=""
 DEPLOY_STARTED=0
@@ -156,7 +157,7 @@ MAIN OPTIONS
     -e <env>               Environment: staging | production
     -b <branch>            Git branch to deploy, default: main
     -d, --dry-run          Simulate deployment actions
-    -v                     Verbose mode
+    -v                     Verbose mode: stream raw command output to the terminal
 
 GIT OPTIONS
     --repo <url>           Clone repository if project path does not exist
@@ -164,7 +165,7 @@ GIT OPTIONS
 
 QUALITY OPTIONS
     --skip-lint            Skip lint/static analysis
-    --strict               Treat warnings or missing optional tools as errors
+    --strict               Treat warnings, lint failures, or missing optional tools as errors
     --lint-tool <tool>     Use a specific lint tool
     --skip-tests           Skip unit tests
     --test-pattern <text>  Run tests whose path contains text
@@ -189,15 +190,16 @@ DEPLOY OPTIONS
     --user <username>      SSH username
     --key <path>           SSH private key path
     --ssh-port <port>      SSH port, default: 22
-    --target <path>        Local or remote deployment path
-    --deploy-dir <dir>     Local directory to upload after build
+    --target <path>        Local or remote deployment path; remote mode can infer this
+    --deploy-dir <dir>     Local directory to upload after build; auto-detects dist/build/out/public
     --remote-cmd "<cmd>"   Command executed on the server after upload
     --restart <service>    Restart a service after deployment
     --transfer <tool>      Transfer tool for remote mode: rsync | scp
     --setup-server         Prepare a fresh remote Linux server before upload
+    --no-setup-server      Disable automatic remote server preparation
     --app-kind <kind>      auto | frontend | backend
     --backend-runtime <rt> auto | python | node
-    --domain <domain>      Domain/server_name for generated nginx config
+    --domain <domain>      Domain/server_name for generated nginx config; inferred from --host when host is a name
     --app-port <port>      Backend app port used by generated reverse proxy
     --start-cmd "<cmd>"    Backend start command, auto-detected when omitted
     --service-name <name>  systemd service name for backend auto-start
@@ -205,7 +207,7 @@ DEPLOY OPTIONS
     --setup-cmd "<cmd>"    Extra setup command executed before upload
 
 SMOKE TEST OPTIONS
-    --url <url>            URL for smoke test
+    --url <url>            URL for smoke test; remote mode infers http://<domain-or-host>
     --port <port>          Port for smoke test
     --retries <number>     Number of smoke-test retries
     --timeout <seconds>    Timeout for each smoke-test attempt
@@ -235,7 +237,8 @@ EXAMPLES
     ./pipepilot -t -p /srv/app -e staging -v
     sudo ./pipepilot -r -p /srv/app
     ./pipepilot -d -p /srv/app -e production
-    ./pipepilot -p ./frontend -e production --remote --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /var/www/frontend --deploy-dir dist --url https://myserver.com
+    ./pipepilot -p ./frontend -e production --remote --host myserver.com --user ubuntu --key ~/.ssh/server.pem
+    ./pipepilot -p ./frontend -e production --remote --host 192.0.2.10 --user ubuntu --key ~/.ssh/server.pem
     ./pipepilot -p ./backend -e production --remote --setup-server --app-kind backend --backend-runtime node --host myserver.com --user ubuntu --key ~/.ssh/server.pem --target /srv/backend --app-port 3000 --domain api.myserver.com
 HELP
 }
@@ -255,111 +258,31 @@ pipepilot_version() {
 }
 
 show_banner() {
-    if show_logo_image; then
-        printf '\n'
-        printf 'Automate. Validate. Deploy. Rollback safely.\n'
-        return
+    local reset="" bold="" cyan="" blue="" dim=""
+
+    if supports_color; then
+        reset=$'\033[0m'
+        bold=$'\033[1m'
+        cyan=$'\033[36m'
+        blue=$'\033[34m'
+        dim=$'\033[2m'
     fi
 
-    cat <<'BANNER'
- ____  _            ____  _ _       _
-|  _ \(_)_ __   ___|  _ \(_) | ___ | |_
-| |_) | | '_ \ / _ \ |_) | | |/ _ \| __|
-|  __/| | |_) |  __/  __/| | | (_) | |_
-|_|   |_| .__/ \___|_|   |_|_|\___/ \__|
-        |_|
-Automate. Validate. Deploy. Rollback safely.
-BANNER
+    printf '\n'
+    printf '%b\n' "${bold}${cyan} ____  _            ${blue}____  _ _       _${reset}"
+    printf '%b\n' "${bold}${cyan}|  _ \\(_)_ __   ___${blue}|  _ \\(_) | ___ | |_${reset}"
+    printf '%b\n' "${bold}${cyan}| |_) | | '_ \\ / _ \\${blue} |_) | | |/ _ \\| __|${reset}"
+    printf '%b\n' "${bold}${cyan}|  __/| | |_) |  __/${blue}  __/| | | (_) | |_${reset}"
+    printf '%b\n' "${bold}${cyan}|_|   |_| .__/ \\___${blue}|_|   |_|_|\\___/ \\__|${reset}"
+    printf '%b\n' "${bold}${cyan}        |_|${reset}"
+    printf '%b\n' "${dim}Automate. Validate. Deploy. Rollback safely.${reset}"
 }
 
-show_logo_image() {
-    # Terminals cannot all print PNG files directly, so PipePilot uses the
-    # project logo image when a supported image renderer is available and keeps
-    # the ASCII banner as the portable fallback.
-    [[ -f "$LOGO_IMAGE" ]] || return 1
+supports_color() {
     [[ -t 1 ]] || return 1
-
-    if command -v chafa >/dev/null 2>&1; then
-        chafa --size=70x16 "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if command -v viu >/dev/null 2>&1; then
-        viu -w 70 "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if command -v imgcat >/dev/null 2>&1; then
-        imgcat -W 70 "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if [[ -n "${WEZTERM_EXECUTABLE:-}" ]] && command -v wezterm >/dev/null 2>&1; then
-        wezterm imgcat --width 70 "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if [[ -n "${KITTY_WINDOW_ID:-}" ]] && command -v kitty >/dev/null 2>&1; then
-        kitty +kitten icat \
-            --align left \
-            --place 70x16@0x0 \
-            --transfer-mode file \
-            "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if command -v magick >/dev/null 2>&1; then
-        show_logo_with_imagemagick magick "$LOGO_IMAGE"
-        return $?
-    fi
-
-    if command -v convert >/dev/null 2>&1; then
-        show_logo_with_imagemagick convert "$LOGO_IMAGE"
-        return $?
-    fi
-
-    return 1
-}
-
-show_logo_with_imagemagick() {
-    # ImageMagick gives a dependency-light fallback for normal terminals: it
-    # samples the PNG and paints a compact true-color terminal preview using
-    # ANSI background colors.
-    local imagemagick_command="$1"
-    local image_path="$2"
-    local logo_width="${PIPEPILOT_LOGO_WIDTH:-38}"
-    local logo_height="${PIPEPILOT_LOGO_HEIGHT:-10}"
-
-    [[ "$logo_width" =~ ^[0-9]+$ ]] || logo_width=38
-    [[ "$logo_height" =~ ^[0-9]+$ ]] || logo_height=10
-
-    "$imagemagick_command" "$image_path" \
-        -fuzz 8% -trim +repage \
-        -resize "${logo_width}x${logo_height}" \
-        -background white -gravity center -extent "${logo_width}x${logo_height}" \
-        txt:- 2>/dev/null | awk -F'[:,() ]+' '
-            NR == 1 { next }
-            {
-                y = $2 + 0
-                r = int($3 + 0)
-                g = int($4 + 0)
-                b = int($5 + 0)
-
-                if (NR > 2 && y != current_y) {
-                    printf "\033[0m\n"
-                }
-                current_y = y
-
-                if (r > 245 && g > 245 && b > 245) {
-                    printf "\033[0m  "
-                } else {
-                    printf "\033[48;2;%d;%d;%dm  ", r, g, b
-                }
-            }
-            END {
-                printf "\033[0m\n"
-            }
-        '
+    [[ -z "${NO_COLOR:-}" ]] || return 1
+    [[ "${TERM:-}" != "dumb" ]] || return 1
+    return 0
 }
 
 # ----------------------------- Log helpers ---------------------------------
@@ -367,6 +290,13 @@ ensure_log_file() {
     mkdir -p "$LOG_DIR"
     LOG_FILE="$LOG_DIR/history.log"
     touch "$LOG_FILE"
+}
+
+init_run_logs() {
+    ensure_log_file
+    RUN_ID="$(timestamp)-$$"
+    RAW_LOG_FILE="$LOG_DIR/run-$RUN_ID.raw.log"
+    : > "$RAW_LOG_FILE"
 }
 
 timestamp() {
@@ -393,11 +323,75 @@ log_error() {
     echo "$entry" >> "$LOG_FILE"
 }
 
+raw_log_command() {
+    [[ -n "$RAW_LOG_FILE" ]] || return 0
+    {
+        printf '\n[%s] ' "$(timestamp)"
+        printf '%q ' "$@"
+        printf '\n'
+    } >> "$RAW_LOG_FILE"
+}
+
+raw_log_text() {
+    [[ -n "$RAW_LOG_FILE" ]] || return 0
+    printf '%s\n' "$1" >> "$RAW_LOG_FILE"
+}
+
+status_line() {
+    [[ "$VERBOSE" -eq 0 ]] || return 0
+    printf '%s\n' "$1"
+}
+
+status_start() {
+    local label="$1"
+    local detail="${2:-}"
+    if [[ -n "$detail" ]]; then
+        status_line "[RUN] $label - $detail"
+    else
+        status_line "[RUN] $label"
+    fi
+}
+
+status_ok() {
+    local label="$1"
+    local detail="${2:-}"
+    if [[ -n "$detail" ]]; then
+        status_line "[OK]  $label - $detail"
+    else
+        status_line "[OK]  $label"
+    fi
+}
+
+status_warn() {
+    status_line "[WARN] $1"
+}
+
+status_fail() {
+    status_line "[FAIL] $1"
+}
+
+stage_description() {
+    case "$1" in
+        GIT) echo "sync source and detect project" ;;
+        LINT) echo "run static checks" ;;
+        TEST) echo "run available tests" ;;
+        BUILD) echo "install dependencies and build artifact" ;;
+        ARCHIVE) echo "create rollback archive" ;;
+        DEPLOY) echo "prepare remote and upload artifact" ;;
+        SMOKE) echo "verify deployed app" ;;
+        *) echo "" ;;
+    esac
+}
+
 die() {
     local code="$1"
     local message="$2"
     log_error "$message -- code $code"
-    show_help
+    case "$code" in
+        "$ERR_UNKNOWN_OPTION"|"$ERR_MISSING_PARAMETER"|"$ERR_CONFIG")
+            show_help
+            ;;
+    esac
     exit "$code"
 }
 
@@ -417,18 +411,68 @@ run_cmd() {
         return 0
     fi
     log_info "$description: $*"
-    "$@"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        "$@"
+    else
+        raw_log_text "[$description]"
+        raw_log_command "$@"
+        "$@" >> "$RAW_LOG_FILE" 2>&1
+    fi
 }
 
 run_in_project() {
     # Execute a command from PROJECT_PATH without permanently changing the
     # caller's current directory.
-    ( cd "$PROJECT_PATH" && "$@" )
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        ( cd "$PROJECT_PATH" && "$@" )
+    else
+        raw_log_text "[PROJECT] $PROJECT_PATH"
+        raw_log_command "$@"
+        ( cd "$PROJECT_PATH" && "$@" ) >> "$RAW_LOG_FILE" 2>&1
+    fi
 }
 
 run_shell_in_project() {
     local command_text="$1"
-    ( cd "$PROJECT_PATH" && bash -lc "$command_text" )
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        ( cd "$PROJECT_PATH" && bash -lc "$command_text" )
+    else
+        raw_log_text "[PROJECT] $PROJECT_PATH"
+        raw_log_command bash -lc "$command_text"
+        ( cd "$PROJECT_PATH" && bash -lc "$command_text" ) >> "$RAW_LOG_FILE" 2>&1
+    fi
+}
+
+capture_in_project() {
+    # Execute a command whose stdout is needed by PipePilot itself. Command
+    # output is still copied to the raw log in normal mode for traceability.
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        ( cd "$PROJECT_PATH" && "$@" )
+    else
+        raw_log_text "[CAPTURE] $PROJECT_PATH"
+        raw_log_command "$@"
+        local output status
+        output="$( ( cd "$PROJECT_PATH" && "$@" ) 2>> "$RAW_LOG_FILE" )"
+        status=$?
+        printf '%s' "$output" >> "$RAW_LOG_FILE"
+        printf '\n' >> "$RAW_LOG_FILE"
+        printf '%s' "$output"
+        return "$status"
+    fi
+}
+
+package_json_has_script() {
+    local script_name="$1"
+    [[ -f "$PROJECT_PATH/package.json" ]] || return 1
+
+    if command -v node >/dev/null 2>&1; then
+        (
+            cd "$PROJECT_PATH" &&
+                node -e "const p=require('./package.json'); process.exit(p.scripts && Object.prototype.hasOwnProperty.call(p.scripts, process.argv[1]) ? 0 : 1)" "$script_name"
+        ) >/dev/null 2>&1
+    else
+        grep -q "\"$script_name\"[[:space:]]*:" "$PROJECT_PATH/package.json"
+    fi
 }
 
 # ----------------------------- Configuration -------------------------------
@@ -735,6 +779,11 @@ parse_args() {
                 CLI_SETUP_SERVER_SET=1
                 shift
                 ;;
+            --no-setup-server)
+                SETUP_SERVER=0
+                CLI_SETUP_SERVER_SET=1
+                shift
+                ;;
             --app-kind)
                 need_value "$1" "${2:-}"
                 APP_KIND="$2"
@@ -962,12 +1011,15 @@ run_stage_or_die() {
     local stage_name="$1"
     local error_code="$2"
     shift 2
+    status_start "$stage_name" "$(stage_description "$stage_name")"
     "$@" || {
         local status=$?
         [[ "$status" -ne 0 ]] || status="$error_code"
         rollback_after_failure
+        status_fail "$stage_name failed -- raw output: $RAW_LOG_FILE"
         die "$error_code" "[$stage_name] Stage failed"
     }
+    status_ok "$stage_name"
 }
 
 run_sequential_pipeline() {
@@ -1037,6 +1089,15 @@ run_thread_pipeline() {
 
 run_pipeline() {
     log_info "[START] Pipeline started -- $PROJECT_PATH"
+    log_info "[START] Raw command output -- $RAW_LOG_FILE"
+    status_line ""
+    status_line "PipePilot run"
+    status_line "Project: $PROJECT_PATH"
+    status_line "Environment: $ENVIRONMENT"
+    status_line "Mode: $MODE"
+    status_line "Structured log: $LOG_FILE"
+    status_line "Raw output: $RAW_LOG_FILE"
+    status_line ""
     local status=0
     case "$MODE" in
         sequential) run_sequential_pipeline || status=$? ;;
@@ -1049,6 +1110,20 @@ run_pipeline() {
         exit "$status"
     fi
     log_info "[END] Pipeline completed successfully"
+    status_line ""
+    status_ok "Pipeline completed successfully"
+    if [[ -n "$REMOTE_HOST" ]]; then
+        status_line "Remote host: $REMOTE_HOST"
+    fi
+    if [[ -n "$TARGET_PATH" ]]; then
+        status_line "Target: $TARGET_PATH"
+    fi
+    if [[ -n "$SMOKE_URL" ]]; then
+        status_line "Smoke URL: $SMOKE_URL"
+    elif [[ -n "$REMOTE_HOST" ]]; then
+        status_line "Smoke URL: http://${DOMAIN_NAME:-$REMOTE_HOST}"
+    fi
+    status_line "Raw output: $RAW_LOG_FILE"
 }
 
 main() {
@@ -1056,7 +1131,7 @@ main() {
     load_configs
     normalize_paths
     validate_options
-    ensure_log_file
+    init_run_logs
     load_stage_files
     show_banner
 

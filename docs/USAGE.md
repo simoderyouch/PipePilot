@@ -53,11 +53,7 @@ Frontend example:
   --remote \
   --host myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
-  --target /var/www/frontend \
-  --deploy-dir dist \
-  --build-cmd "npm run build" \
-  --url https://myserver.com
+  --key ~/.ssh/server_key.pem
 ```
 
 Backend example:
@@ -92,16 +88,18 @@ Custom SSH port and scp transfer:
   --url http://192.168.1.50:8080
 ```
 
-Required remote options are `--host`, `--user`, `--key`, and `--target`.
-Optional remote controls are `--ssh-port`, `--deploy-dir`, `--remote-cmd`,
-`--restart`, and `--transfer`.
+Required remote options are `--host`, `--user`, and `--key`. Remote mode can
+infer `--target`, `--deploy-dir`, `--setup-server`, `--domain`, and `--url`.
+Optional remote controls are `--ssh-port`, `--target`, `--deploy-dir`,
+`--remote-cmd`, `--restart`, `--transfer`, and `--no-setup-server`.
 
 ## Smart Fresh-Server Setup
 
-When the remote server is new and has no tools installed yet, use
-`--setup-server`. PipePilot connects through SSH before upload, detects or uses
-the selected package manager, installs the packages needed for the app type,
-creates the target directory, and can generate a simple nginx configuration.
+In remote mode, PipePilot enables server setup automatically unless
+`--no-setup-server` is provided. It connects through SSH before upload, detects
+or uses the selected package manager, installs the packages needed for the app
+type, creates the target directory, and can generate a simple nginx
+configuration.
 
 Static frontend on a fresh VPS:
 
@@ -110,16 +108,9 @@ Static frontend on a fresh VPS:
   -p ./frontend \
   -e production \
   --remote \
-  --setup-server \
-  --app-kind frontend \
   --host myserver.com \
   --user ubuntu \
-  --key ~/.ssh/server_key.pem \
-  --target /var/www/frontend \
-  --deploy-dir dist \
-  --domain myserver.com \
-  --build-cmd "npm run build" \
-  --url https://myserver.com
+  --key ~/.ssh/server_key.pem
 ```
 
 Node backend with nginx reverse proxy:
@@ -177,6 +168,10 @@ service:
 - Override: use `--start-cmd` or `--service-name` when your app needs a custom
   command or service name.
 
+When a frontend and backend share the same host, generated nginx configuration
+keeps the frontend at `/` and proxies the backend under `/api/`. Use a smoke URL
+such as `http://example.com/api/health` for that combined layout.
+
 Python backend with automatic FastAPI detection:
 
 ```bash
@@ -216,6 +211,23 @@ Node backend with a custom start command:
 
 ## Logs
 
+PipePilot keeps normal terminal output clean and orientational. A typical run
+shows stage state, smart inference, setup state, the final target, and the raw
+log path:
+
+```text
+[RUN] BUILD
+[OK]  BUILD
+[RUN] DEPLOY
+[SMART] Target: /var/www/app
+[SMART] Deploy source: dist
+[SMART] Setup: enabled
+[SETUP] kind=frontend runtime=none packages="nginx rsync curl"
+[OK]  DEPLOY
+[RUN] SMOKE
+[OK]  Smoke URL reachable: http://example.com
+```
+
 PipePilot writes structured log entries in this format:
 
 ```text
@@ -223,8 +235,9 @@ yyyy-mm-dd-hh-mm-ss : username : INFOS : message
 yyyy-mm-dd-hh-mm-ss : username : ERROR : message
 ```
 
-By default, logs are written to `logs/history.log`. Use `-l <dir>` for a custom
-location.
+By default, structured logs are written to `logs/history.log`, and noisy command
+output is written to `logs/run-<timestamp>-<pid>.raw.log`. Use `-l <dir>` for a
+custom location. Use `-v` to stream raw command output directly to the terminal.
 
 ## Pipeline Stage Files
 
