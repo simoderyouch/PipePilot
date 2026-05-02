@@ -4,6 +4,22 @@ All notable PipePilot changes are tracked here to demonstrate clear project
 versioning. The format follows the spirit of Keep a Changelog, and releases use
 semantic version numbers from `VERSION`.
 
+## [0.9.0] - 2026-05-02
+
+### Added
+
+- Dockerfile and Docker Compose deployment support for full-stack projects.
+- Automatic stack detection for Compose projects and Docker runtime detection
+  for single-Dockerfile projects.
+- Remote Docker setup for fresh Linux servers during PipePilot deployments.
+- Docker stack scenario notes in `docker_senarios.md`.
+
+### Changed
+
+- Remote deployment can now treat multi-service frontend/backend projects as a
+  `stack` and run Compose after upload.
+- Build logic defers Docker builds to the remote server for remote deployments.
+
 ## [0.8.0] - 2026-05-01
 
 ### Added
